@@ -4,18 +4,118 @@ struct CompanionRootView: View {
     @ObservedObject var core: CompanionCore
 
     var body: some View {
-        Group {
+        ZStack(alignment: .top) {
             if core.isExpanded {
                 ExpandedCompanionView(core: core)
             } else {
                 CollapsedCompanionView(core: core)
             }
         }
-        .animation(.spring(response: 0.24, dampingFraction: 0.85), value: core.isExpanded)
+        .frame(width: 780, height: 560, alignment: .top)
+        .animation(.spring(response: 0.32, dampingFraction: 0.78, blendDuration: 0.1), value: core.isExpanded)
     }
 }
 
 private struct CollapsedCompanionView: View {
+    @ObservedObject var core: CompanionCore
+
+    var body: some View {
+        if core.notchDisplayInfo.hasNotch {
+            NotchGradientCollapsedView(core: core)
+        } else {
+            PillCollapsedView(core: core)
+        }
+    }
+}
+
+private struct NotchGradientCollapsedView: View {
+    @ObservedObject var core: CompanionCore
+
+    private var info: NotchDisplayInfo { core.notchDisplayInfo }
+
+    private let glowColors: [Color] = [
+        Color(red: 0.95, green: 0.2, blue: 0.15),
+        Color(red: 1.0, green: 0.35, blue: 0.1),
+        Color(red: 1.0, green: 0.5, blue: 0.0).opacity(0.6),
+        Color.clear,
+    ]
+
+    var body: some View {
+        HStack(spacing: 0) {
+            leftWing
+            Color.clear
+                .frame(width: info.notchWidth, height: info.notchHeight)
+            rightWing
+        }
+        .frame(width: info.totalCollapsedWidth, height: info.notchHeight)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            core.setExpanded(true)
+        }
+    }
+
+    private var leftWing: some View {
+        ZStack(alignment: .trailing) {
+            UnevenRoundedRectangle(
+                topLeadingRadius: 0,
+                bottomLeadingRadius: 12,
+                bottomTrailingRadius: 8,
+                topTrailingRadius: 0
+            )
+            .fill(
+                LinearGradient(
+                    colors: glowColors.reversed(),
+                    startPoint: .leading,
+                    endPoint: .trailing
+                )
+            )
+            .shadow(color: Color.red.opacity(0.4), radius: 8, x: 0, y: 2)
+
+            HStack(spacing: 4) {
+                Circle()
+                    .fill(core.needsInputTasks.isEmpty ? Color.green : Color.orange)
+                    .frame(width: 6, height: 6)
+
+                if core.runningTasks.count > 0 {
+                    Text("\(core.runningTasks.count)")
+                        .font(.system(size: 9, weight: .bold, design: .rounded))
+                        .foregroundStyle(.white.opacity(0.85))
+                }
+            }
+            .padding(.trailing, 10)
+        }
+        .frame(width: info.wingWidth, height: info.notchHeight)
+    }
+
+    private var rightWing: some View {
+        ZStack(alignment: .leading) {
+            UnevenRoundedRectangle(
+                topLeadingRadius: 0,
+                bottomLeadingRadius: 8,
+                bottomTrailingRadius: 12,
+                topTrailingRadius: 0
+            )
+            .fill(
+                LinearGradient(
+                    colors: glowColors,
+                    startPoint: .leading,
+                    endPoint: .trailing
+                )
+            )
+            .shadow(color: Color.red.opacity(0.4), radius: 8, x: 0, y: 2)
+
+            if !core.needsInputTasks.isEmpty {
+                Text("\(core.needsInputTasks.count)")
+                    .font(.system(size: 9, weight: .bold, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.85))
+                    .padding(.leading, 10)
+            }
+        }
+        .frame(width: info.wingWidth, height: info.notchHeight)
+    }
+}
+
+private struct PillCollapsedView: View {
     @ObservedObject var core: CompanionCore
 
     var body: some View {
@@ -83,6 +183,7 @@ private struct ExpandedCompanionView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .padding(14)
+        .padding(.top, core.notchDisplayInfo.hasNotch ? core.notchDisplayInfo.notchHeight - 14 : 0)
         .frame(width: 780, height: 560)
         .background(.ultraThickMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))

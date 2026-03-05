@@ -2,6 +2,22 @@ import Combine
 import Foundation
 import SwiftUI
 
+struct NotchDisplayInfo: Equatable {
+    let hasNotch: Bool
+    let notchWidth: CGFloat
+    let notchHeight: CGFloat
+    let wingWidth: CGFloat
+    let totalCollapsedWidth: CGFloat
+
+    static let noNotch = NotchDisplayInfo(
+        hasNotch: false,
+        notchWidth: 0,
+        notchHeight: 38,
+        wingWidth: 0,
+        totalCollapsedWidth: 340
+    )
+}
+
 @MainActor
 final class CompanionCore: ObservableObject {
     enum Tab: String, CaseIterable, Identifiable {
@@ -27,6 +43,8 @@ final class CompanionCore: ObservableObject {
     @Published var connectionStateByProfile: [UUID: String] = [:]
     @Published var pendingRuntimeOperation: PendingRuntimeOperation?
     @Published var lastErrorBanner: String?
+    @Published var notchDisplayInfo: NotchDisplayInfo = .noNotch
+    @Published var isSubmitting: Bool = false
 
     private let stateMachine = TaskStateMachine()
     private let gatewayClient: GatewayClient
@@ -119,6 +137,10 @@ final class CompanionCore: ObservableObject {
     }
 
     func setExpanded(_ expanded: Bool) {
+        if !expanded {
+            guard !isSubmitting else { return }
+            guard pendingRuntimeOperation == nil else { return }
+        }
         isExpanded = expanded
     }
 
@@ -159,6 +181,9 @@ final class CompanionCore: ObservableObject {
             lastErrorBanner = "Select a profile before sending a task."
             return
         }
+
+        isSubmitting = true
+        defer { isSubmitting = false }
 
         let routeId = selectedRouteId
         var task = TaskRecord.draft(profileId: profile.id, routeId: routeId, prompt: prompt)
@@ -202,6 +227,9 @@ final class CompanionCore: ObservableObject {
             lastErrorBanner = "Profile unavailable for follow-up response."
             return
         }
+
+        isSubmitting = true
+        defer { isSubmitting = false }
 
         do {
             try await gatewayClient.answerFollowUp(task: task, answer: answer, profile: profile)

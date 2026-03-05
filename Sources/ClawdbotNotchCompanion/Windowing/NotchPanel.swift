@@ -1,23 +1,33 @@
 import AppKit
 
 final class NotchPanel: NSPanel {
-    override var canBecomeKey: Bool { true }
+    override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
 
     init(contentRect: NSRect) {
         super.init(
             contentRect: contentRect,
-            styleMask: [.borderless, .nonactivatingPanel],
+            styleMask: [.borderless, .nonactivatingPanel, .utilityWindow, .hudWindow],
             backing: .buffered,
             defer: false
         )
 
-        isOpaque = false
-        backgroundColor = .clear
-        hasShadow = true
-        level = .mainMenu + 2
-        isMovable = false
         isFloatingPanel = true
-        collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary]
+        isOpaque = false
+        titleVisibility = .hidden
+        titlebarAppearsTransparent = true
+        backgroundColor = .clear
+        isMovable = false
+        level = .mainMenu + 3
+        hasShadow = false
+        isReleasedWhenClosed = false
+        appearance = NSAppearance(named: .darkAqua)
+
+        collectionBehavior = [
+            .fullScreenAuxiliary,
+            .stationary,
+            .canJoinAllSpaces,
+            .ignoresCycle,
+        ]
     }
 }
