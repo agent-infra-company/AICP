@@ -51,7 +51,7 @@ enum TelemetryEvent {
     }
 }
 
-final class LocalTelemetryManager: TelemetryManaging {
+final class LocalTelemetryManager: TelemetryManaging, @unchecked Sendable {
     private let queue = DispatchQueue(label: "clawdbot.telemetry")
     private let fileURL: URL
     private var optIn: Bool = false

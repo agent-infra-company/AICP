@@ -9,9 +9,13 @@ protocol NotificationService: AnyObject, Sendable {
 }
 
 final class UserNotificationService: NotificationService, @unchecked Sendable {
-    private let center = UNUserNotificationCenter.current()
+    private var center: UNUserNotificationCenter? {
+        guard Bundle.main.bundleIdentifier != nil else { return nil }
+        return UNUserNotificationCenter.current()
+    }
 
     func prepare() async throws {
+        guard let center else { return }
         let options: UNAuthorizationOptions = [.alert, .badge, .sound]
         _ = try await center.requestAuthorization(options: options)
 
@@ -54,6 +58,7 @@ final class UserNotificationService: NotificationService, @unchecked Sendable {
     }
 
     private func send(title: String, body: String, task: TaskRecord) async {
+        guard let center else { return }
         let content = UNMutableNotificationContent()
         content.title = title
         content.body = body
