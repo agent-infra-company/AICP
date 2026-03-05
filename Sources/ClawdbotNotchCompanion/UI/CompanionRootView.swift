@@ -1,13 +1,34 @@
 import SwiftUI
+import AppKit
 
 private let panelWidth: CGFloat = 680
 private let panelHeight: CGFloat = 280
 private let glowPad: CGFloat = 60
 private let windowWidth: CGFloat = panelWidth + glowPad * 2
 private let windowHeight: CGFloat = panelHeight + glowPad
+private let avatarWidth: CGFloat = 140
+private let rolodexRowHeight: CGFloat = 36
+private let rolodexPeekHeight: CGFloat = 22
+private let rolodexVisibleRows: Int = 3
+private let rolodexViewportHeight: CGFloat = (rolodexRowHeight * CGFloat(rolodexVisibleRows)) + (rolodexPeekHeight * 2)
 
 // animate-ui inspired spring: stiffness 200, damping 20 → response ~0.45, fraction ~0.7
 private let expandSpring = Animation.spring(response: 0.45, dampingFraction: 0.7, blendDuration: 0.15)
+
+private struct SampleRolodexTask {
+    let workspace: String
+    let name: String
+    let status: String
+    let gridMode: SnakeGridMode
+}
+
+private let sampleRolodexTasks: [SampleRolodexTask] = [
+    .init(workspace: "signal-arena", name: "apupneja/phase4-analytics", status: "Working...", gridMode: .animated),
+    .init(workspace: "conductor", name: "apupneja/notch-chat-ui", status: "Working...", gridMode: .animated),
+    .init(workspace: "quito", name: "apupneja/fix-glow-render", status: "Queued", gridMode: .greyed),
+    .init(workspace: "loom", name: "apupneja/calendar-sync", status: "Working...", gridMode: .animated),
+    .init(workspace: "ferry", name: "apupneja/api-v2-migrate", status: "Queued", gridMode: .greyed),
+]
 
 struct CompanionRootView: View {
     @ObservedObject var core: CompanionCore
@@ -187,7 +208,7 @@ private struct ExpandedCompanionView: View {
     @ObservedObject var core: CompanionCore
 
     private var notchTop: CGFloat {
-        core.notchDisplayInfo.hasNotch ? core.notchDisplayInfo.notchHeight + 4 : 12
+        core.notchDisplayInfo.hasNotch ? core.notchDisplayInfo.notchHeight : 0
     }
 
     private var allTasks: [TaskRecord] {
@@ -249,18 +270,16 @@ private struct ExpandedCompanionView: View {
                     .blur(radius: 2)
 
                 // Main content panel
-                VStack(alignment: .leading, spacing: 10) {
-                    // Top row: Avatar + ChatGPT-style input
-                    HStack(alignment: .center, spacing: 12) {
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .fill(Color(white: 0.12))
-                            .frame(width: 44, height: 44)
-                            .overlay(
-                                Image(systemName: "eyes")
-                                    .font(.system(size: 22))
-                                    .foregroundStyle(.white.opacity(0.6))
-                            )
+                HStack(spacing: 0) {
+                    // Left column: Rive avatar spanning full height below notch
+                    RiveAvatarView()
+                        .frame(width: avatarWidth, height: panelHeight - notchTop)
+                        .clipped()
+                        .padding(.top, notchTop)
 
+                    // Right column: input + rolodex tasks
+                    VStack(alignment: .leading, spacing: 0) {
+                        // ChatGPT-style input
                         HStack(spacing: 8) {
                             TextField("Message Clawdbot...", text: $core.composePrompt)
                                 .textFieldStyle(.plain)
@@ -282,39 +301,32 @@ private struct ExpandedCompanionView: View {
                         .padding(.vertical, 9)
                         .background(Color.white.opacity(0.08))
                         .clipShape(Capsule())
-                    }
+                        .padding(.bottom, 4)
 
-                    // Divider
-                    Rectangle()
-                        .fill(Color.white.opacity(0.06))
-                        .frame(height: 1)
-
-                    // Task list with staggered entrance
-                    ScrollView(.vertical, showsIndicators: false) {
-                        VStack(spacing: 2) {
-                            if allTasks.isEmpty {
-                                StaggeredRow(index: 0) {
-                                    StaticTaskRow(workspace: "signal-arena", name: "apupneja/phase4-analytics", status: "Working...", gridMode: .animated)
-                                }
-                                StaggeredRow(index: 1) {
-                                    StaticTaskRow(workspace: "conductor", name: "apupneja/notch-chat-ui", status: "Working...", gridMode: .animated)
-                                }
-                                StaggeredRow(index: 2) {
-                                    StaticTaskRow(workspace: "quito", name: "apupneja/fix-glow-render", status: "Queued", gridMode: .greyed)
-                                }
-                            } else {
-                                ForEach(Array(allTasks.enumerated()), id: \.element.id) { index, task in
-                                    StaggeredRow(index: index) {
-                                        CompactTaskRow(task: task)
-                                    }
-                                }
+                        // Rolodex task list (3 visible rows + top/bottom peeks)
+                        if allTasks.isEmpty {
+                            RolodexTaskList(itemCount: sampleRolodexTasks.count) { index in
+                                let task = sampleRolodexTasks[index]
+                                StaticTaskRow(
+                                    workspace: task.workspace,
+                                    name: task.name,
+                                    status: task.status,
+                                    gridMode: task.gridMode
+                                )
+                                .frame(height: rolodexRowHeight)
+                            }
+                        } else {
+                            RolodexTaskList(itemCount: allTasks.count) { index in
+                                CompactTaskRow(task: allTasks[index])
+                                    .frame(height: rolodexRowHeight)
                             }
                         }
                     }
+                    .padding(.leading, 4)
+                    .padding(.trailing, 16)
+                    .padding(.bottom, 14)
+                    .padding(.top, notchTop)
                 }
-                .padding(.horizontal, 16)
-                .padding(.bottom, 14)
-                .padding(.top, notchTop)
                 .frame(width: panelWidth, height: panelHeight)
                 .background(Color.black)
                 .clipShape(ExpandedNotchShape(bottomRadius: 20))
@@ -323,6 +335,188 @@ private struct ExpandedCompanionView: View {
         }
         .padding(.horizontal, glowPad)
         .frame(width: windowWidth, height: windowHeight, alignment: .top)
+    }
+}
+
+// MARK: - Rolodex Task List
+
+private struct RolodexTaskList<RowContent: View>: View {
+    let itemCount: Int
+    let rowContent: (Int) -> RowContent
+
+    @State private var topVisibleIndex: Int = 0
+    @State private var dragOffset: CGFloat = 0
+    @State private var wheelAccumulator: CGFloat = 0
+
+    private let maxStepPerGesture = 4
+
+    init(itemCount: Int, @ViewBuilder rowContent: @escaping (Int) -> RowContent) {
+        self.itemCount = max(itemCount, 1)
+        self.rowContent = rowContent
+    }
+
+    private var maxTopVisibleIndex: Int {
+        max(0, itemCount - rolodexVisibleRows)
+    }
+
+    private var baseOffset: CGFloat {
+        -(rolodexRowHeight - rolodexPeekHeight)
+    }
+
+    private var clampedDragOffset: CGFloat {
+        min(max(dragOffset, -rolodexRowHeight), rolodexRowHeight)
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            ForEach(-1...rolodexVisibleRows, id: \.self) { relative in
+                rowSlot(relative: relative)
+            }
+        }
+        .offset(y: baseOffset + clampedDragOffset)
+        .frame(height: rolodexViewportHeight, alignment: .top)
+        .clipped()
+        .contentShape(Rectangle())
+        .overlay(
+            ScrollWheelCaptureView { deltaY in
+                handleScrollWheel(deltaY: deltaY)
+            }
+        )
+        .gesture(
+            DragGesture(minimumDistance: 2)
+                .onChanged { value in
+                    dragOffset = value.translation.height
+                }
+                .onEnded { value in
+                    completeDrag(value)
+                }
+        )
+        .animation(.interactiveSpring(response: 0.26, dampingFraction: 0.84), value: topVisibleIndex)
+        .animation(.interactiveSpring(response: 0.2, dampingFraction: 0.88), value: dragOffset)
+        .onChange(of: itemCount) { _, _ in
+            topVisibleIndex = clampedTopIndex(topVisibleIndex)
+            wheelAccumulator = 0
+        }
+        .mask(
+            VStack(spacing: 0) {
+                LinearGradient(
+                    stops: [
+                        .init(color: .white.opacity(0.22), location: 0),
+                        .init(color: .white.opacity(0.6), location: 0.4),
+                        .init(color: .white, location: 1)
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .frame(height: rolodexPeekHeight)
+
+                Rectangle()
+
+                LinearGradient(
+                    stops: [
+                        .init(color: .white, location: 0),
+                        .init(color: .white.opacity(0.6), location: 0.6),
+                        .init(color: .white.opacity(0.22), location: 1)
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .frame(height: rolodexPeekHeight)
+            }
+        )
+    }
+
+    private func completeDrag(_ value: DragGesture.Value) {
+        let predictedTravel = value.predictedEndTranslation.height
+        var steps = Int(round(-predictedTravel / rolodexRowHeight))
+
+        if steps == 0 {
+            if value.translation.height <= -(rolodexRowHeight / 2) {
+                steps = 1
+            } else if value.translation.height >= (rolodexRowHeight / 2) {
+                steps = -1
+            }
+        }
+
+        steps = min(max(steps, -maxStepPerGesture), maxStepPerGesture)
+
+        if steps != 0 {
+            _ = applyStep(steps)
+        }
+
+        dragOffset = 0
+    }
+
+    private func handleScrollWheel(deltaY: CGFloat) {
+        guard itemCount > 1 else { return }
+
+        wheelAccumulator += deltaY
+        let threshold = rolodexRowHeight / 2
+
+        while abs(wheelAccumulator) >= threshold {
+            if wheelAccumulator > 0 {
+                if applyStep(-1) {
+                    wheelAccumulator -= threshold
+                } else {
+                    wheelAccumulator = 0
+                    break
+                }
+            } else {
+                if applyStep(1) {
+                    wheelAccumulator += threshold
+                } else {
+                    wheelAccumulator = 0
+                    break
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func rowSlot(relative: Int) -> some View {
+        let index = topVisibleIndex + relative
+        if (0..<itemCount).contains(index) {
+            rowContent(index)
+                .frame(height: rolodexRowHeight)
+                .opacity((relative == -1 || relative == rolodexVisibleRows) ? 0.58 : 1)
+                .scaleEffect((relative == -1 || relative == rolodexVisibleRows) ? 0.98 : 1, anchor: .center)
+        } else {
+            Color.clear
+                .frame(height: rolodexRowHeight)
+        }
+    }
+
+    private func clampedTopIndex(_ rawIndex: Int) -> Int {
+        min(max(rawIndex, 0), maxTopVisibleIndex)
+    }
+
+    private func applyStep(_ step: Int) -> Bool {
+        let next = clampedTopIndex(topVisibleIndex + step)
+        guard next != topVisibleIndex else { return false }
+        topVisibleIndex = next
+        return true
+    }
+}
+
+private struct ScrollWheelCaptureView: NSViewRepresentable {
+    let onScroll: (CGFloat) -> Void
+
+    func makeNSView(context: Context) -> ScrollWheelNSView {
+        let view = ScrollWheelNSView()
+        view.onScroll = onScroll
+        return view
+    }
+
+    func updateNSView(_ nsView: ScrollWheelNSView, context: Context) {
+        nsView.onScroll = onScroll
+    }
+}
+
+private final class ScrollWheelNSView: NSView {
+    var onScroll: ((CGFloat) -> Void)?
+
+    override func scrollWheel(with event: NSEvent) {
+        onScroll?(event.scrollingDeltaY)
     }
 }
 
@@ -486,31 +680,6 @@ private struct CompactTaskRow: View {
         case .needsInput: return "Needs input"
         default: return task.status.rawValue
         }
-    }
-}
-
-private struct StaggeredRow<Content: View>: View {
-    let index: Int
-    let content: Content
-    @State private var appeared = false
-
-    init(index: Int, @ViewBuilder content: () -> Content) {
-        self.index = index
-        self.content = content()
-    }
-
-    var body: some View {
-        content
-            .opacity(appeared ? 1 : 0)
-            .offset(y: appeared ? 0 : 8)
-            .onAppear {
-                withAnimation(expandSpring.delay(Double(index) * 0.08)) {
-                    appeared = true
-                }
-            }
-            .onDisappear {
-                appeared = false
-            }
     }
 }
 
