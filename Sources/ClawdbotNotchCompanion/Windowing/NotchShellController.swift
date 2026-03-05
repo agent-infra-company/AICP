@@ -24,12 +24,17 @@ final class NotchShellController {
     private var cancellables: Set<AnyCancellable> = []
     nonisolated(unsafe) private var globalMonitor: Any?
     nonisolated(unsafe) private var localMonitor: Any?
+    nonisolated(unsafe) private var globalMoveMonitor: Any?
+    nonisolated(unsafe) private var localMoveMonitor: Any?
     nonisolated(unsafe) private var screenObserver: NSObjectProtocol?
 
     private var cachedNotchGeo: NotchGeometry?
     private var cachedScreenFrame: CGRect = .zero
 
-    private static let expandedSize = CGSize(width: 780, height: 560)
+    private var collapseWorkItem: DispatchWorkItem?
+    private var expandWorkItem: DispatchWorkItem?
+
+    private static let expandedSize = CGSize(width: 800, height: 340)
 
     init(core: CompanionCore) {
         self.core = core
@@ -40,6 +45,7 @@ final class NotchShellController {
 
         bindState()
         installClickMonitors()
+        installHoverMonitors()
         installScreenObserver()
         positionWindow()
         updateNotchInfo()
@@ -55,6 +61,12 @@ final class NotchShellController {
         if let localMonitor {
             NSEvent.removeMonitor(localMonitor)
         }
+        if let globalMoveMonitor {
+            NSEvent.removeMonitor(globalMoveMonitor)
+        }
+        if let localMoveMonitor {
+            NSEvent.removeMonitor(localMoveMonitor)
+        }
         if let screenObserver {
             NotificationCenter.default.removeObserver(screenObserver)
         }
@@ -68,9 +80,12 @@ final class NotchShellController {
 
     private func bindState() {
         core.$isExpanded
-            .sink { [weak self] _ in
+            .sink { [weak self] expanded in
                 guard let self else { return }
                 self.panel.orderFrontRegardless()
+                if expanded {
+                    self.panel.makeKey()
+                }
             }
             .store(in: &cancellables)
 
@@ -141,25 +156,106 @@ final class NotchShellController {
             }
 
             if core.isExpanded {
-                // Collapse when clicking outside the panel
                 if !panel.frame.contains(point) {
+                    cancelCollapseTimer()
                     core.setExpanded(false)
+                } else {
+                    // User clicked inside the panel — cancel any pending collapse
+                    cancelCollapseTimer()
                 }
             } else {
-                // Expand when clicking in the notch hit zone
                 let notchRect = notchHitRect(in: screen)
                 if notchRect.contains(point) {
+                    cancelCollapseTimer()
                     core.setExpanded(true)
-                    panel.orderFrontRegardless()
+                    panel.makeKeyAndOrderFront(nil)
                 }
             }
         }
     }
 
+    // MARK: - Hover Monitors
+
+    private func installHoverMonitors() {
+        globalMoveMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.mouseMoved]) { [weak self] _ in
+            self?.handleMouseMoved(point: NSEvent.mouseLocation)
+        }
+
+        localMoveMonitor = NSEvent.addLocalMonitorForEvents(matching: [.mouseMoved]) { [weak self] event in
+            self?.handleMouseMoved(point: NSEvent.mouseLocation)
+            return event
+        }
+    }
+
+    private func handleMouseMoved(point: NSPoint) {
+        Task { @MainActor in
+            guard let screen = primaryScreen else { return }
+
+            if core.isExpanded {
+                let panelRect = panel.frame.insetBy(dx: -10, dy: -10)
+                if panelRect.contains(point) {
+                    cancelCollapseTimer()
+                } else {
+                    startCollapseTimer()
+                }
+                // Cancel any pending expand if mouse left the notch zone
+                cancelExpandTimer()
+            } else {
+                let hoverRect = notchHitRect(in: screen)
+                if hoverRect.contains(point) {
+                    // Start expand timer — must hold for 2s
+                    startExpandTimer()
+                } else {
+                    // Mouse left the notch zone — cancel pending expand
+                    cancelExpandTimer()
+                }
+            }
+        }
+    }
+
+    private func startExpandTimer() {
+        guard expandWorkItem == nil else { return }
+
+        let item = DispatchWorkItem { [weak self] in
+            Task { @MainActor in
+                guard let self else { return }
+                self.expandWorkItem = nil
+                self.core.setExpanded(true)
+                self.panel.orderFrontRegardless()
+            }
+        }
+        expandWorkItem = item
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: item)
+    }
+
+    private func cancelExpandTimer() {
+        expandWorkItem?.cancel()
+        expandWorkItem = nil
+    }
+
+    private func startCollapseTimer() {
+        guard !core.isSubmitting else { return }
+        guard collapseWorkItem == nil else { return }
+
+        let item = DispatchWorkItem { [weak self] in
+            Task { @MainActor in
+                guard let self else { return }
+                self.collapseWorkItem = nil
+                self.core.setExpanded(false)
+            }
+        }
+        collapseWorkItem = item
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: item)
+    }
+
+    private func cancelCollapseTimer() {
+        collapseWorkItem?.cancel()
+        collapseWorkItem = nil
+    }
+
     // MARK: - Notch Geometry
 
     private var primaryScreen: NSScreen? {
-        // Prefer the screen with a notch (built-in display)
         NSScreen.screens.first(where: { $0.safeAreaInsets.top > 0 })
             ?? NSScreen.screens.first(where: { $0.frame.origin == .zero })
             ?? NSScreen.main
@@ -183,11 +279,8 @@ final class NotchShellController {
 
         let notchHeight = screen.safeAreaInsets.top
 
-        // Precise detection via auxiliary areas (same approach as boring.notch)
         if let leftArea = screen.auxiliaryTopLeftArea,
            let rightArea = screen.auxiliaryTopRightArea {
-            // The auxiliary areas are the usable regions flanking the notch.
-            // Subtract both from screen width to get notch width, +4 for seamless overlap.
             let notchWidth = screen.frame.width - leftArea.width - rightArea.width + 4
             if notchWidth > 0, notchWidth < screen.frame.width * 0.5 {
                 return NotchGeometry(
@@ -198,7 +291,6 @@ final class NotchShellController {
             }
         }
 
-        // Fallback: safeAreaInsets.top > 0 means there IS a notch, estimate width
         let estimatedNotchWidth: CGFloat = 210
         return NotchGeometry(
             notchWidth: estimatedNotchWidth,
@@ -231,9 +323,6 @@ final class NotchShellController {
 
     // MARK: - Window Positioning
 
-    /// Positions the window once at the top of the screen. The window stays at a
-    /// fixed size (expanded dimensions) — SwiftUI handles all visual expand/collapse.
-    /// Transparent areas of the borderless panel pass through mouse events.
     private func positionWindow() {
         guard let screen = primaryScreen else {
             return
