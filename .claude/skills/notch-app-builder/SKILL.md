@@ -96,5 +96,5 @@ Run a focused checklist:
 - Update feed and package artifacts are valid.
 
 ## Reference File
-Read [references/boring-notch-implementation.md](./references/boring-notch-implementation.md) when implementing against this repository.
+Read [references/boring-notch-implementation.md](references/boring-notch-implementation.md) when implementing against this repository.
 Use it to map each architecture step to concrete files in `boring.notch`.

@@ -1,4 +1,0 @@
-interface:
-  display_name: "Notch App Builder"
-  short_description: "Build a macOS notch app architecture and implementation plan"
-  default_prompt: "Build or extend a macOS notch app with window lifecycle, notch UI behavior, media/HUD integrations, and settings."
