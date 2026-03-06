@@ -1,3 +1,4 @@
+import AppKit
 import Combine
 import Foundation
 import SwiftUI
@@ -45,6 +46,7 @@ final class CompanionCore: ObservableObject {
     @Published var lastErrorBanner: String?
     @Published var notchDisplayInfo: NotchDisplayInfo = .noNotch
     @Published var isSubmitting: Bool = false
+    @Published var externalSnapshots: [TaskSourceKind: [ExternalTaskSnapshot]] = [:]
 
     private let stateMachine = TaskStateMachine()
     private let gatewayClient: GatewayClient
@@ -54,8 +56,10 @@ final class CompanionCore: ObservableObject {
     private let telemetryManager: TelemetryManaging
     private let loginItemManager: LoginItemManaging
     private let retentionManager: RetentionManaging
+    private let taskSourceAggregator: TaskSourceAggregator
 
     private var eventTasks: [UUID: Task<Void, Never>] = [:]
+    private var aggregatorTask: Task<Void, Never>?
 
     init(
         gatewayClient: GatewayClient,
@@ -64,7 +68,8 @@ final class CompanionCore: ObservableObject {
         notificationService: NotificationService,
         telemetryManager: TelemetryManaging,
         loginItemManager: LoginItemManaging,
-        retentionManager: RetentionManaging
+        retentionManager: RetentionManaging,
+        taskSourceAggregator: TaskSourceAggregator
     ) {
         self.gatewayClient = gatewayClient
         self.runtimeManager = runtimeManager
@@ -73,12 +78,14 @@ final class CompanionCore: ObservableObject {
         self.telemetryManager = telemetryManager
         self.loginItemManager = loginItemManager
         self.retentionManager = retentionManager
+        self.taskSourceAggregator = taskSourceAggregator
     }
 
     deinit {
         for task in eventTasks.values {
             task.cancel()
         }
+        aggregatorTask?.cancel()
     }
 
     func bootstrap() async {
@@ -107,6 +114,43 @@ final class CompanionCore: ObservableObject {
 
         if let profile = selectedProfile {
             await refreshRoutes(profile)
+        }
+
+        await startExternalTaskMonitoring()
+    }
+
+    var allDisplayTasks: [DisplayTask] {
+        let openClawTasks = tasks
+            .filter { !$0.status.isTerminal }
+            .map { DisplayTask(from: $0, profiles: profiles) }
+        let externalTasks = externalSnapshots.values
+            .flatMap { $0 }
+            .map { DisplayTask(from: $0) }
+        return (openClawTasks + externalTasks)
+            .sorted(by: { $0.updatedAt > $1.updatedAt })
+    }
+
+    var allRunningCount: Int {
+        allDisplayTasks.filter { [.queued, .running].contains($0.status) }.count
+    }
+
+    var allNeedsInputCount: Int {
+        allDisplayTasks.filter { $0.status == .needsInput }.count
+    }
+
+    func openTask(_ displayTask: DisplayTask) {
+        if displayTask.sourceKind == .openClaw {
+            let rawId = String(displayTask.id.dropFirst("openclaw-".count))
+            focusTask(rawId)
+            return
+        }
+
+        if let url = displayTask.deepLinkURL {
+            NSWorkspace.shared.open(url)
+        } else if displayTask.sourceKind == .claudeCode {
+            if let terminalURL = URL(fileURLWithPath: "/System/Applications/Utilities/Terminal.app") as URL? {
+                NSWorkspace.shared.open(terminalURL)
+            }
         }
     }
 
@@ -568,5 +612,43 @@ final class CompanionCore: ObservableObject {
         Task {
             await runtimeManager.updateConfiguration(profiles: profiles, templateSets: commandTemplateSets)
         }
+    }
+
+    private func startExternalTaskMonitoring() async {
+        await taskSourceAggregator.startAll()
+
+        aggregatorTask = Task { [weak self] in
+            guard let self else { return }
+            let stream = self.taskSourceAggregator.snapshotStream
+            for await newSnapshots in stream {
+                await MainActor.run {
+                    self.processExternalSnapshots(newSnapshots)
+                }
+            }
+        }
+    }
+
+    private func processExternalSnapshots(_ new: [TaskSourceKind: [ExternalTaskSnapshot]]) {
+        let oldFlat = externalSnapshots.values.flatMap { $0 }
+
+        for (_, snapshots) in new {
+            for snapshot in snapshots {
+                if let old = oldFlat.first(where: { $0.id == snapshot.id && $0.sourceKind == snapshot.sourceKind }) {
+                    guard old.status != snapshot.status else { continue }
+                    switch snapshot.status {
+                    case .needsInput:
+                        Task { await notificationService.sendExternalTaskNeedsInput(snapshot) }
+                    case .completed:
+                        Task { await notificationService.sendExternalTaskCompleted(snapshot) }
+                    case .failed, .needsAttention:
+                        Task { await notificationService.sendExternalTaskFailed(snapshot) }
+                    default:
+                        break
+                    }
+                }
+            }
+        }
+
+        externalSnapshots = new
     }
 }

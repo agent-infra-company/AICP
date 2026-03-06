@@ -6,6 +6,9 @@ protocol NotificationService: AnyObject, Sendable {
     func sendTaskNeedsInput(_ task: TaskRecord) async
     func sendTaskCompleted(_ task: TaskRecord) async
     func sendTaskFailed(_ task: TaskRecord) async
+    func sendExternalTaskNeedsInput(_ snapshot: ExternalTaskSnapshot) async
+    func sendExternalTaskCompleted(_ snapshot: ExternalTaskSnapshot) async
+    func sendExternalTaskFailed(_ snapshot: ExternalTaskSnapshot) async
 }
 
 final class UserNotificationService: NotificationService, @unchecked Sendable {
@@ -57,6 +60,30 @@ final class UserNotificationService: NotificationService, @unchecked Sendable {
         )
     }
 
+    func sendExternalTaskNeedsInput(_ snapshot: ExternalTaskSnapshot) async {
+        await sendExternal(
+            title: "\(snapshot.sourceKind.displayName): Needs input",
+            body: snapshot.needsInputPrompt ?? snapshot.title,
+            snapshot: snapshot
+        )
+    }
+
+    func sendExternalTaskCompleted(_ snapshot: ExternalTaskSnapshot) async {
+        await sendExternal(
+            title: "\(snapshot.sourceKind.displayName): Task completed",
+            body: snapshot.title,
+            snapshot: snapshot
+        )
+    }
+
+    func sendExternalTaskFailed(_ snapshot: ExternalTaskSnapshot) async {
+        await sendExternal(
+            title: "\(snapshot.sourceKind.displayName): Task needs attention",
+            body: snapshot.lastError ?? snapshot.title,
+            snapshot: snapshot
+        )
+    }
+
     private func send(title: String, body: String, task: TaskRecord) async {
         guard let center else { return }
         let content = UNMutableNotificationContent()
@@ -68,6 +95,32 @@ final class UserNotificationService: NotificationService, @unchecked Sendable {
 
         let request = UNNotificationRequest(
             identifier: "task-\(task.taskId)-\(UUID().uuidString)",
+            content: content,
+            trigger: nil
+        )
+
+        do {
+            try await center.add(request)
+        } catch {
+            // Best-effort notifications.
+        }
+    }
+
+    private func sendExternal(title: String, body: String, snapshot: ExternalTaskSnapshot) async {
+        guard let center else { return }
+        let content = UNMutableNotificationContent()
+        content.title = title
+        content.body = body
+        content.sound = .default
+        content.categoryIdentifier = "TASK_EVENTS"
+        content.userInfo = [
+            "taskId": snapshot.id,
+            "sourceKind": snapshot.sourceKind.rawValue,
+            "deepLinkURL": snapshot.deepLinkURL?.absoluteString ?? "",
+        ]
+
+        let request = UNNotificationRequest(
+            identifier: "ext-\(snapshot.id)-\(UUID().uuidString)",
             content: content,
             trigger: nil
         )

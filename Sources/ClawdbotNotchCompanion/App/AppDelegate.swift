@@ -20,6 +20,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         let loginItemManager = LoginItemManager()
         let retentionManager = RetentionScheduler()
 
+        let aggregator = TaskSourceAggregator()
+
         self.core = CompanionCore(
             gatewayClient: gatewayClient,
             runtimeManager: runtimeManager,
@@ -27,10 +29,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             notificationService: notificationService,
             telemetryManager: telemetryManager,
             loginItemManager: loginItemManager,
-            retentionManager: retentionManager
+            retentionManager: retentionManager,
+            taskSourceAggregator: aggregator
         )
 
         super.init()
+
+        Task {
+            await aggregator.register(ConductorTaskSource())
+            await aggregator.register(ClaudeCodeTaskSource())
+            await aggregator.register(CodexTaskSource())
+            await aggregator.register(ClaudeDesktopTaskSource())
+        }
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -50,7 +60,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         didReceive response: UNNotificationResponse,
         withCompletionHandler completionHandler: @escaping () -> Void
     ) {
-        if let taskId = response.notification.request.content.userInfo["taskId"] as? String {
+        let userInfo = response.notification.request.content.userInfo
+
+        if let sourceKindRaw = userInfo["sourceKind"] as? String,
+           let _ = TaskSourceKind(rawValue: sourceKindRaw) {
+            // External task notification — deep link to source app
+            if let deepLinkStr = userInfo["deepLinkURL"] as? String,
+               !deepLinkStr.isEmpty,
+               let url = URL(string: deepLinkStr) {
+                Task { @MainActor in
+                    NSWorkspace.shared.open(url)
+                }
+            }
+        } else if let taskId = userInfo["taskId"] as? String {
+            // OpenClaw task notification — focus in panel
             Task { @MainActor in
                 core.focusTask(taskId)
             }

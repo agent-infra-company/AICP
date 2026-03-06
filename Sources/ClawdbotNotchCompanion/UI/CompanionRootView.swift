@@ -169,7 +169,7 @@ private struct PillCollapsedView: View {
     var body: some View {
         HStack(spacing: 10) {
             Circle()
-                .fill(core.needsInputTasks.isEmpty ? Color.green : Color.orange)
+                .fill(core.allNeedsInputCount == 0 ? Color.green : Color.orange)
                 .frame(width: 8, height: 8)
 
             Text("Clawdbot")
@@ -177,12 +177,12 @@ private struct PillCollapsedView: View {
 
             Spacer(minLength: 8)
 
-            Text("\(core.runningTasks.count) running")
+            Text("\(core.allRunningCount) running")
                 .font(.system(size: 11, weight: .medium, design: .rounded))
                 .foregroundStyle(.secondary)
 
-            if !core.needsInputTasks.isEmpty {
-                Text("\(core.needsInputTasks.count) input")
+            if core.allNeedsInputCount > 0 {
+                Text("\(core.allNeedsInputCount) input")
                     .font(.system(size: 11, weight: .medium, design: .rounded))
                     .foregroundStyle(Color.orange)
             }
@@ -211,8 +211,8 @@ private struct ExpandedCompanionView: View {
         core.notchDisplayInfo.hasNotch ? core.notchDisplayInfo.notchHeight : 0
     }
 
-    private var allTasks: [TaskRecord] {
-        core.tasks.sorted(by: { $0.updatedAt > $1.updatedAt })
+    private var displayTasks: [DisplayTask] {
+        core.allDisplayTasks
     }
 
     var body: some View {
@@ -304,7 +304,7 @@ private struct ExpandedCompanionView: View {
                         .padding(.bottom, 4)
 
                         // Rolodex task list (3 visible rows + top/bottom peeks)
-                        if allTasks.isEmpty {
+                        if displayTasks.isEmpty {
                             RolodexTaskList(itemCount: sampleRolodexTasks.count) { index in
                                 let task = sampleRolodexTasks[index]
                                 StaticTaskRow(
@@ -316,9 +316,13 @@ private struct ExpandedCompanionView: View {
                                 .frame(height: rolodexRowHeight)
                             }
                         } else {
-                            RolodexTaskList(itemCount: allTasks.count) { index in
-                                CompactTaskRow(task: allTasks[index])
+                            RolodexTaskList(itemCount: displayTasks.count) { index in
+                                UnifiedTaskRow(task: displayTasks[index])
                                     .frame(height: rolodexRowHeight)
+                                    .contentShape(Rectangle())
+                                    .onTapGesture {
+                                        core.openTask(displayTasks[index])
+                                    }
                             }
                         }
                     }
@@ -626,8 +630,8 @@ private struct StaticTaskRow: View {
     }
 }
 
-private struct CompactTaskRow: View {
-    let task: TaskRecord
+private struct UnifiedTaskRow: View {
+    let task: DisplayTask
 
     private var gridMode: SnakeGridMode {
         switch task.status {
@@ -638,18 +642,35 @@ private struct CompactTaskRow: View {
         }
     }
 
+    private var sourceColor: Color {
+        switch task.sourceKind {
+        case .openClaw: return .blue
+        case .conductor: return .purple
+        case .claudeCode: return .green
+        case .codex: return .teal
+        case .claudeDesktop: return .orange
+        }
+    }
+
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 6) {
             SnakeGrid(mode: gridMode)
 
-            Text(task.routeId)
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(.white.opacity(0.9))
-                .lineLimit(1)
+            Image(systemName: task.sourceKind.iconName)
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(sourceColor.opacity(0.8))
+                .frame(width: 14)
 
-            Image(systemName: "chevron.right")
-                .font(.system(size: 9, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.3))
+            if let workspace = task.workspace {
+                Text(workspace)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.9))
+                    .lineLimit(1)
+
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.3))
+            }
 
             Text(task.title)
                 .font(.system(size: 13, weight: .regular))
@@ -659,27 +680,15 @@ private struct CompactTaskRow: View {
             Text("·")
                 .foregroundStyle(.white.opacity(0.3))
 
-            Text(statusText)
+            Text(task.statusText)
                 .font(.system(size: 13, weight: .regular))
-                .foregroundStyle(.white.opacity(0.4))
+                .foregroundStyle(task.status == .needsInput ? Color.orange.opacity(0.7) : .white.opacity(0.4))
                 .lineLimit(1)
 
             Spacer(minLength: 0)
         }
-        .padding(.horizontal, 12)
+        .padding(.horizontal, 10)
         .padding(.vertical, 7)
-    }
-
-    private var statusText: String {
-        if let progress = task.latestProgress {
-            return progress
-        }
-        switch task.status {
-        case .running: return "Working..."
-        case .queued: return "Queued"
-        case .needsInput: return "Needs input"
-        default: return task.status.rawValue
-        }
     }
 }
 
