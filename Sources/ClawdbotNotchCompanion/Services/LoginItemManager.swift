@@ -10,6 +10,9 @@ final class LoginItemManager: LoginItemManaging {
         guard #available(macOS 13.0, *) else {
             return
         }
+        guard AppRuntimeEnvironment.current.supportsLoginItemRegistration else {
+            return
+        }
 
         if enabled {
             do {

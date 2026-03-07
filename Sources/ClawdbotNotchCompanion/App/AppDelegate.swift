@@ -1,13 +1,17 @@
 import AppKit
 import Combine
 import Foundation
+import SwiftUI
 import UserNotifications
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
     let core: CompanionCore
+    private let environment = AppRuntimeEnvironment.current
 
     private var shellController: NotchShellController?
+    private var onboardingController: OnboardingWindowController?
+    private var unbundledDebugWindow: NSWindow?
 
     override init() {
         let secretStore = KeychainSecretStore(service: "com.clawdbot.notch")
@@ -44,15 +48,65 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        if Bundle.main.bundleIdentifier != nil {
+        // `swift run` launches an unbundled process.
+        guard environment.supportsOnboarding else {
+            Task { @MainActor in
+                await core.bootstrap()
+                // Full onboarding is unstable in unbundled runs; open notch shell directly.
+                showNotchShell()
+                showUnbundledDebugWindow()
+            }
+            return
+        }
+        if environment.supportsNotifications {
             UNUserNotificationCenter.current().delegate = self
         }
 
         Task { @MainActor in
-            self.shellController = NotchShellController(core: core)
-            shellController?.show()
             await core.bootstrap()
+
+            if !core.settings.hasCompletedOnboarding {
+                onboardingController = OnboardingWindowController(core: core)
+                onboardingController?.showIfNeeded { [weak self] in
+                    guard let self else { return }
+                    self.onboardingController = nil
+                    self.showNotchShell()
+                }
+            } else {
+                showNotchShell()
+            }
         }
+    }
+
+    private func showNotchShell() {
+        shellController = NotchShellController(core: core)
+        shellController?.show()
+    }
+
+    private func showUnbundledDebugWindow() {
+        let content = VStack(spacing: 10) {
+            Text("Clawdbot is running in `swift run` mode.")
+            Text("The notch companion is loaded. Menu bar, full onboarding, and notification permissions require launching the app bundle.")
+                .foregroundStyle(.secondary)
+        }
+        .padding(24)
+        .frame(minWidth: 520, minHeight: 140)
+
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 560, height: 200),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable],
+            backing: .buffered,
+            defer: false
+        )
+        window.title = "Clawdbot (swift run)"
+        window.isReleasedWhenClosed = false
+        window.center()
+        window.contentView = NSHostingView(rootView: content)
+
+        unbundledDebugWindow = window
+        NSApp.setActivationPolicy(.regular)
+        NSApp.activate(ignoringOtherApps: true)
+        window.makeKeyAndOrderFront(nil)
     }
 
     nonisolated func userNotificationCenter(

@@ -11,6 +11,9 @@ private let rolodexRowHeight: CGFloat = 36
 private let rolodexPeekHeight: CGFloat = 22
 private let rolodexVisibleRows: Int = 3
 private let rolodexViewportHeight: CGFloat = (rolodexRowHeight * CGFloat(rolodexVisibleRows)) + (rolodexPeekHeight * 2)
+private let viewAllButtonHeight: CGFloat = 30
+private let fullListPanelHeight: CGFloat = 420
+private let fullListVisibleRows: Int = 6
 
 // animate-ui inspired spring: stiffness 200, damping 20 → response ~0.45, fraction ~0.7
 private let expandSpring = Animation.spring(response: 0.45, dampingFraction: 0.7, blendDuration: 0.15)
@@ -51,8 +54,9 @@ struct CompanionRootView: View {
                     .transition(.opacity)
             }
         }
-        .frame(width: windowWidth, height: windowHeight, alignment: .top)
+        .frame(width: windowWidth, height: core.showingFullTaskList ? fullListPanelHeight + glowPad : windowHeight, alignment: .top)
         .animation(expandSpring, value: core.isExpanded)
+        .animation(expandSpring, value: core.showingFullTaskList)
     }
 }
 
@@ -103,6 +107,14 @@ private struct NotchGradientCollapsedView: View {
     @ObservedObject var core: CompanionCore
 
     private var info: NotchDisplayInfo { core.notchDisplayInfo }
+    private var glowColor: Color { Color(hex: core.settings.glowColorHex) }
+    private var intensityMultiplier: Double {
+        switch core.settings.notchStyle {
+        case .glow: return 1.0
+        case .subtle: return 0.5
+        case .hidden: return 0.0
+        }
+    }
 
     var body: some View {
         TimelineView(.animation(minimumInterval: 1.0 / 30)) { context in
@@ -111,48 +123,50 @@ private struct NotchGradientCollapsedView: View {
             let fastAngle = t.remainder(dividingBy: 5) / 5 * 360
 
             ZStack {
-                NotchOutlineShape(notchWidth: info.notchWidth, wingWidth: info.wingWidth)
-                    .stroke(Color.red.opacity(0.1), style: StrokeStyle(lineWidth: 36, lineCap: .round, lineJoin: .round))
-                    .blur(radius: 14)
+                if core.settings.notchStyle != .hidden {
+                    NotchOutlineShape(notchWidth: info.notchWidth, wingWidth: info.wingWidth)
+                        .stroke(glowColor.opacity(0.1 * intensityMultiplier), style: StrokeStyle(lineWidth: 36, lineCap: .round, lineJoin: .round))
+                        .blur(radius: 14)
 
-                NotchOutlineShape(notchWidth: info.notchWidth, wingWidth: info.wingWidth)
-                    .stroke(Color.red.opacity(0.14), style: StrokeStyle(lineWidth: 22, lineCap: .round, lineJoin: .round))
-                    .blur(radius: 10)
+                    NotchOutlineShape(notchWidth: info.notchWidth, wingWidth: info.wingWidth)
+                        .stroke(glowColor.opacity(0.14 * intensityMultiplier), style: StrokeStyle(lineWidth: 22, lineCap: .round, lineJoin: .round))
+                        .blur(radius: 10)
 
-                NotchOutlineShape(notchWidth: info.notchWidth, wingWidth: info.wingWidth)
-                    .stroke(
-                        AngularGradient(
-                            colors: [
-                                Color.red.opacity(0.4),
-                                Color.red.opacity(0.06),
-                                Color.red.opacity(0.35),
-                                Color.red.opacity(0.06),
-                                Color.red.opacity(0.4),
-                            ],
-                            center: UnitPoint(x: 0.5, y: 0),
-                            angle: .degrees(slowAngle)
-                        ),
-                        style: StrokeStyle(lineWidth: 7, lineCap: .round, lineJoin: .round)
-                    )
-                    .blur(radius: 3)
+                    NotchOutlineShape(notchWidth: info.notchWidth, wingWidth: info.wingWidth)
+                        .stroke(
+                            AngularGradient(
+                                colors: [
+                                    glowColor.opacity(0.4 * intensityMultiplier),
+                                    glowColor.opacity(0.06 * intensityMultiplier),
+                                    glowColor.opacity(0.35 * intensityMultiplier),
+                                    glowColor.opacity(0.06 * intensityMultiplier),
+                                    glowColor.opacity(0.4 * intensityMultiplier),
+                                ],
+                                center: UnitPoint(x: 0.5, y: 0),
+                                angle: .degrees(slowAngle)
+                            ),
+                            style: StrokeStyle(lineWidth: 7, lineCap: .round, lineJoin: .round)
+                        )
+                        .blur(radius: 3)
 
-                NotchOutlineShape(notchWidth: info.notchWidth, wingWidth: info.wingWidth)
-                    .stroke(
-                        AngularGradient(
-                            colors: [
-                                Color.red.opacity(0.25),
-                                Color.clear,
-                                Color.clear,
-                                Color.red.opacity(0.25),
-                                Color.clear,
-                                Color.clear,
-                            ],
-                            center: UnitPoint(x: 0.5, y: 0),
-                            angle: .degrees(-fastAngle)
-                        ),
-                        style: StrokeStyle(lineWidth: 5, lineCap: .round, lineJoin: .round)
-                    )
-                    .blur(radius: 2)
+                    NotchOutlineShape(notchWidth: info.notchWidth, wingWidth: info.wingWidth)
+                        .stroke(
+                            AngularGradient(
+                                colors: [
+                                    glowColor.opacity(0.25 * intensityMultiplier),
+                                    Color.clear,
+                                    Color.clear,
+                                    glowColor.opacity(0.25 * intensityMultiplier),
+                                    Color.clear,
+                                    Color.clear,
+                                ],
+                                center: UnitPoint(x: 0.5, y: 0),
+                                angle: .degrees(-fastAngle)
+                            ),
+                            style: StrokeStyle(lineWidth: 5, lineCap: .round, lineJoin: .round)
+                        )
+                        .blur(radius: 2)
+                }
             }
         }
         .frame(width: info.totalCollapsedWidth, height: info.notchHeight)
@@ -212,7 +226,20 @@ private struct ExpandedCompanionView: View {
     }
 
     private var displayTasks: [DisplayTask] {
-        core.allDisplayTasks
+        core.notchDisplayTasks
+    }
+
+    private var currentPanelHeight: CGFloat {
+        core.showingFullTaskList ? fullListPanelHeight : panelHeight
+    }
+
+    private var glowColor: Color { Color(hex: core.settings.glowColorHex) }
+    private var intensityMultiplier: Double {
+        switch core.settings.notchStyle {
+        case .glow: return 1.0
+        case .subtle: return 0.5
+        case .hidden: return 0.0
+        }
     }
 
     var body: some View {
@@ -222,123 +249,157 @@ private struct ExpandedCompanionView: View {
             let fastAngle = t.remainder(dividingBy: 5) / 5 * 360
 
             ZStack {
-                // Outer ambient glow
-                ExpandedNotchShape(bottomRadius: 20)
-                    .stroke(Color.red.opacity(0.1), style: StrokeStyle(lineWidth: 36, lineCap: .round, lineJoin: .round))
-                    .blur(radius: 14)
+                if core.settings.notchStyle != .hidden {
+                    // Outer ambient glow
+                    ExpandedNotchShape(bottomRadius: 20)
+                        .stroke(glowColor.opacity(0.1 * intensityMultiplier), style: StrokeStyle(lineWidth: 36, lineCap: .round, lineJoin: .round))
+                        .blur(radius: 14)
 
-                // Mid ambient glow
-                ExpandedNotchShape(bottomRadius: 20)
-                    .stroke(Color.red.opacity(0.14), style: StrokeStyle(lineWidth: 22, lineCap: .round, lineJoin: .round))
-                    .blur(radius: 10)
+                    // Mid ambient glow
+                    ExpandedNotchShape(bottomRadius: 20)
+                        .stroke(glowColor.opacity(0.14 * intensityMultiplier), style: StrokeStyle(lineWidth: 22, lineCap: .round, lineJoin: .round))
+                        .blur(radius: 10)
 
-                // Slow rotating gradient shimmer
-                ExpandedNotchShape(bottomRadius: 20)
-                    .stroke(
-                        AngularGradient(
-                            colors: [
-                                Color.red.opacity(0.4),
-                                Color.red.opacity(0.06),
-                                Color.red.opacity(0.35),
-                                Color.red.opacity(0.06),
-                                Color.red.opacity(0.4),
-                            ],
-                            center: UnitPoint(x: 0.5, y: 0),
-                            angle: .degrees(slowAngle)
-                        ),
-                        style: StrokeStyle(lineWidth: 7, lineCap: .round, lineJoin: .round)
-                    )
-                    .blur(radius: 3)
+                    // Slow rotating gradient shimmer
+                    ExpandedNotchShape(bottomRadius: 20)
+                        .stroke(
+                            AngularGradient(
+                                colors: [
+                                    glowColor.opacity(0.4 * intensityMultiplier),
+                                    glowColor.opacity(0.06 * intensityMultiplier),
+                                    glowColor.opacity(0.35 * intensityMultiplier),
+                                    glowColor.opacity(0.06 * intensityMultiplier),
+                                    glowColor.opacity(0.4 * intensityMultiplier),
+                                ],
+                                center: UnitPoint(x: 0.5, y: 0),
+                                angle: .degrees(slowAngle)
+                            ),
+                            style: StrokeStyle(lineWidth: 7, lineCap: .round, lineJoin: .round)
+                        )
+                        .blur(radius: 3)
 
-                // Fast counter-rotating highlight
-                ExpandedNotchShape(bottomRadius: 20)
-                    .stroke(
-                        AngularGradient(
-                            colors: [
-                                Color.red.opacity(0.25),
-                                Color.clear,
-                                Color.clear,
-                                Color.red.opacity(0.25),
-                                Color.clear,
-                                Color.clear,
-                            ],
-                            center: UnitPoint(x: 0.5, y: 0),
-                            angle: .degrees(-fastAngle)
-                        ),
-                        style: StrokeStyle(lineWidth: 5, lineCap: .round, lineJoin: .round)
-                    )
-                    .blur(radius: 2)
+                    // Fast counter-rotating highlight
+                    ExpandedNotchShape(bottomRadius: 20)
+                        .stroke(
+                            AngularGradient(
+                                colors: [
+                                    glowColor.opacity(0.25 * intensityMultiplier),
+                                    Color.clear,
+                                    Color.clear,
+                                    glowColor.opacity(0.25 * intensityMultiplier),
+                                    Color.clear,
+                                    Color.clear,
+                                ],
+                                center: UnitPoint(x: 0.5, y: 0),
+                                angle: .degrees(-fastAngle)
+                            ),
+                            style: StrokeStyle(lineWidth: 5, lineCap: .round, lineJoin: .round)
+                        )
+                        .blur(radius: 2)
+                }
 
                 // Main content panel
                 HStack(spacing: 0) {
                     // Left column: Rive avatar spanning full height below notch
                     RiveAvatarView()
-                        .frame(width: avatarWidth, height: panelHeight - notchTop)
+                        .frame(width: avatarWidth, height: currentPanelHeight - notchTop)
                         .clipped()
                         .padding(.top, notchTop)
 
-                    // Right column: input + rolodex tasks
-                    VStack(alignment: .leading, spacing: 0) {
-                        // ChatGPT-style input
-                        HStack(spacing: 8) {
-                            TextField("Message Clawdbot...", text: $core.composePrompt)
-                                .textFieldStyle(.plain)
-                                .font(.system(size: 13))
-                                .foregroundStyle(.white)
-
-                            if !core.composePrompt.trimmingCharacters(in: .whitespaces).isEmpty {
-                                Button {
-                                    Task { await core.submitPrompt() }
-                                } label: {
-                                    Image(systemName: "arrow.up.circle.fill")
-                                        .font(.system(size: 20))
-                                        .foregroundStyle(.white.opacity(0.8))
-                                }
-                                .buttonStyle(.plain)
+                    // Right column: input + rolodex tasks or full list
+                    if core.showingFullTaskList {
+                        FullTaskListView(core: core) {
+                            withAnimation(expandSpring) {
+                                core.showingFullTaskList = false
                             }
                         }
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 9)
-                        .background(Color.white.opacity(0.08))
-                        .clipShape(Capsule())
-                        .padding(.bottom, 4)
+                        .padding(.leading, 4)
+                        .padding(.trailing, 16)
+                        .padding(.bottom, 14)
+                        .padding(.top, notchTop)
+                    } else {
+                        VStack(alignment: .leading, spacing: 0) {
+                            // ChatGPT-style input
+                            HStack(spacing: 8) {
+                                TextField("Message Clawdbot...", text: $core.composePrompt)
+                                    .textFieldStyle(.plain)
+                                    .font(.system(size: 13))
+                                    .foregroundStyle(.white)
 
-                        // Rolodex task list (3 visible rows + top/bottom peeks)
-                        if displayTasks.isEmpty {
-                            RolodexTaskList(itemCount: sampleRolodexTasks.count) { index in
-                                let task = sampleRolodexTasks[index]
-                                StaticTaskRow(
-                                    workspace: task.workspace,
-                                    name: task.name,
-                                    status: task.status,
-                                    gridMode: task.gridMode
-                                )
-                                .frame(height: rolodexRowHeight)
-                            }
-                        } else {
-                            RolodexTaskList(itemCount: displayTasks.count) { index in
-                                UnifiedTaskRow(task: displayTasks[index])
-                                    .frame(height: rolodexRowHeight)
-                                    .contentShape(Rectangle())
-                                    .onTapGesture {
-                                        core.openTask(displayTasks[index])
+                                if !core.composePrompt.trimmingCharacters(in: .whitespaces).isEmpty {
+                                    Button {
+                                        Task { await core.submitPrompt() }
+                                    } label: {
+                                        Image(systemName: "arrow.up.circle.fill")
+                                            .font(.system(size: 20))
+                                            .foregroundStyle(.white.opacity(0.8))
                                     }
+                                    .buttonStyle(.plain)
+                                }
                             }
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 9)
+                            .background(Color.white.opacity(0.08))
+                            .clipShape(Capsule())
+                            .padding(.bottom, 4)
+
+                            // Rolodex task list (3 visible rows + top/bottom peeks)
+                            if displayTasks.isEmpty {
+                                RolodexTaskList(itemCount: sampleRolodexTasks.count) { index in
+                                    let task = sampleRolodexTasks[index]
+                                    StaticTaskRow(
+                                        workspace: task.workspace,
+                                        name: task.name,
+                                        status: task.status,
+                                        gridMode: task.gridMode
+                                    )
+                                    .frame(height: rolodexRowHeight)
+                                }
+                            } else {
+                                RolodexTaskList(itemCount: displayTasks.count) { index in
+                                    UnifiedTaskRow(task: displayTasks[index])
+                                        .frame(height: rolodexRowHeight)
+                                        .contentShape(Rectangle())
+                                        .onTapGesture {
+                                            core.openTask(displayTasks[index])
+                                        }
+                                }
+                            }
+
+                            // View All button
+                            Button {
+                                withAnimation(expandSpring) {
+                                    core.showingFullTaskList = true
+                                }
+                            } label: {
+                                HStack(spacing: 4) {
+                                    Text("View All Tasks")
+                                        .font(.system(size: 11, weight: .medium))
+                                    Image(systemName: "chevron.right")
+                                        .font(.system(size: 9, weight: .semibold))
+                                }
+                                .foregroundStyle(.white.opacity(0.4))
+                                .frame(maxWidth: .infinity)
+                                .frame(height: viewAllButtonHeight)
+                            }
+                            .buttonStyle(.plain)
+                            .contentShape(Rectangle())
                         }
+                        .padding(.leading, 4)
+                        .padding(.trailing, 16)
+                        .padding(.bottom, 14)
+                        .padding(.top, notchTop)
                     }
-                    .padding(.leading, 4)
-                    .padding(.trailing, 16)
-                    .padding(.bottom, 14)
-                    .padding(.top, notchTop)
                 }
-                .frame(width: panelWidth, height: panelHeight)
+                .frame(width: panelWidth, height: currentPanelHeight)
                 .background(Color.black)
                 .clipShape(ExpandedNotchShape(bottomRadius: 20))
             }
-            .frame(width: panelWidth, height: panelHeight)
+            .frame(width: panelWidth, height: currentPanelHeight)
         }
         .padding(.horizontal, glowPad)
-        .frame(width: windowWidth, height: windowHeight, alignment: .top)
+        .frame(width: windowWidth, height: currentPanelHeight + glowPad, alignment: .top)
+        .animation(expandSpring, value: core.showingFullTaskList)
     }
 }
 
@@ -522,6 +583,19 @@ private final class ScrollWheelNSView: NSView {
     override func scrollWheel(with event: NSEvent) {
         onScroll?(event.scrollingDeltaY)
     }
+
+    // Pass through mouse events so SwiftUI tap gestures on task rows still fire
+    override func mouseDown(with event: NSEvent) {
+        nextResponder?.mouseDown(with: event)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        nextResponder?.mouseUp(with: event)
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        nextResponder?.mouseDragged(with: event)
+    }
 }
 
 // MARK: - Snake Grid Icon
@@ -689,6 +763,87 @@ private struct UnifiedTaskRow: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 7)
+    }
+}
+
+// MARK: - Full Task List View
+
+private struct FullTaskListView: View {
+    @ObservedObject var core: CompanionCore
+    let onBack: () -> Void
+
+    private let pageSize = 20
+
+    @State private var visibleCount = 20
+
+    private var allTasks: [DisplayTask] {
+        core.allDisplayTasksIncludingTerminal
+    }
+
+    private var visibleTasks: [DisplayTask] {
+        Array(allTasks.prefix(visibleCount))
+    }
+
+    private var hasMore: Bool {
+        visibleCount < allTasks.count
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // Header with back button
+            HStack(spacing: 6) {
+                Button {
+                    onBack()
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: 10, weight: .semibold))
+                        Text("Back")
+                            .font(.system(size: 12, weight: .medium))
+                    }
+                    .foregroundStyle(.white.opacity(0.5))
+                }
+                .buttonStyle(.plain)
+
+                Spacer()
+
+                Text("\(allTasks.count) tasks")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.3))
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+
+            Divider()
+                .background(Color.white.opacity(0.1))
+
+            // Scrollable task list
+            ScrollView(.vertical, showsIndicators: true) {
+                LazyVStack(spacing: 0) {
+                    ForEach(visibleTasks) { task in
+                        UnifiedTaskRow(task: task)
+                            .frame(height: rolodexRowHeight)
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                core.openTask(task)
+                            }
+                    }
+
+                    if hasMore {
+                        Button {
+                            visibleCount += pageSize
+                        } label: {
+                            Text("Load more...")
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundStyle(.white.opacity(0.35))
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 32)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+        }
     }
 }
 

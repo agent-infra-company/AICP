@@ -31,6 +31,7 @@ final class CompanionCore: ObservableObject {
     }
 
     @Published var isExpanded: Bool = false
+    @Published var showingFullTaskList: Bool = false
     @Published var selectedTab: Tab = .compose
 
     @Published var profiles: [ProfileConfig] = []
@@ -130,6 +131,29 @@ final class CompanionCore: ObservableObject {
             .sorted(by: { $0.updatedAt > $1.updatedAt })
     }
 
+    /// Tasks shown in the notch: all running/active first, then fill to 5 with recent terminal tasks.
+    var notchDisplayTasks: [DisplayTask] {
+        let maxVisible = 5
+        let all = allDisplayTasksIncludingTerminal
+        let active = all.filter { !$0.status.isTerminal }
+        if active.count >= maxVisible {
+            return active
+        }
+        let recent = all.filter { $0.status.isTerminal }.prefix(maxVisible - active.count)
+        return active + recent
+    }
+
+    /// All tasks including terminal, for the full task list view.
+    var allDisplayTasksIncludingTerminal: [DisplayTask] {
+        let openClawTasks = tasks
+            .map { DisplayTask(from: $0, profiles: profiles) }
+        let externalTasks = externalSnapshots.values
+            .flatMap { $0 }
+            .map { DisplayTask(from: $0) }
+        return (openClawTasks + externalTasks)
+            .sorted(by: { $0.updatedAt > $1.updatedAt })
+    }
+
     var allRunningCount: Int {
         allDisplayTasks.filter { [.queued, .running].contains($0.status) }.count
     }
@@ -145,12 +169,25 @@ final class CompanionCore: ObservableObject {
             return
         }
 
+        // Collapse the notch so the target app is visible and focused
+        setExpanded(false)
+
         if let url = displayTask.deepLinkURL {
             NSWorkspace.shared.open(url)
         } else if displayTask.sourceKind == .claudeCode {
-            if let terminalURL = URL(fileURLWithPath: "/System/Applications/Utilities/Terminal.app") as URL? {
-                NSWorkspace.shared.open(terminalURL)
-            }
+            activateApp(bundleId: "com.apple.Terminal")
+        } else if displayTask.sourceKind == .codex {
+            activateApp(bundleId: "com.openai.codex")
+        } else if displayTask.sourceKind == .claudeDesktop {
+            activateApp(bundleId: "com.anthropic.claudefordesktop")
+        }
+    }
+
+    private func activateApp(bundleId: String) {
+        if let app = NSRunningApplication.runningApplications(withBundleIdentifier: bundleId).first {
+            app.activate()
+        } else if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleId) {
+            NSWorkspace.shared.openApplication(at: url, configuration: .init())
         }
     }
 
@@ -184,6 +221,7 @@ final class CompanionCore: ObservableObject {
         if !expanded {
             guard !isSubmitting else { return }
             guard pendingRuntimeOperation == nil else { return }
+            showingFullTaskList = false
         }
         isExpanded = expanded
     }
@@ -314,6 +352,20 @@ final class CompanionCore: ObservableObject {
 
     func clearPendingRuntimeAction() {
         pendingRuntimeOperation = nil
+    }
+
+    func completeOnboarding() {
+        updateSetting { $0.hasCompletedOnboarding = true }
+    }
+
+    func requestNotificationAuthorization() async -> Bool {
+        do {
+            return try await notificationService.requestAuthorization()
+        } catch {
+            telemetryManager.record(.error("Notification authorization failed: \(error.localizedDescription)"))
+            lastErrorBanner = "Notification authorization failed: \(error.localizedDescription)"
+            return false
+        }
     }
 
     func updateSetting(_ mutate: (inout AppSettings) -> Void) {
@@ -599,6 +651,10 @@ final class CompanionCore: ObservableObject {
     }
 
     private func updateLaunchAtLoginSetting() {
+        guard AppRuntimeEnvironment.current.supportsLoginItemRegistration else {
+            return
+        }
+
         do {
             try loginItemManager.setEnabled(settings.launchAtLogin)
         } catch {

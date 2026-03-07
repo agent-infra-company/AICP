@@ -3,6 +3,7 @@ import UserNotifications
 
 protocol NotificationService: AnyObject, Sendable {
     func prepare() async throws
+    func requestAuthorization() async throws -> Bool
     func sendTaskNeedsInput(_ task: TaskRecord) async
     func sendTaskCompleted(_ task: TaskRecord) async
     func sendTaskFailed(_ task: TaskRecord) async
@@ -13,15 +14,12 @@ protocol NotificationService: AnyObject, Sendable {
 
 final class UserNotificationService: NotificationService, @unchecked Sendable {
     private var center: UNUserNotificationCenter? {
-        guard Bundle.main.bundleIdentifier != nil else { return nil }
+        guard AppRuntimeEnvironment.current.supportsNotifications else { return nil }
         return UNUserNotificationCenter.current()
     }
 
     func prepare() async throws {
         guard let center else { return }
-        let options: UNAuthorizationOptions = [.alert, .badge, .sound]
-        _ = try await center.requestAuthorization(options: options)
-
         let openAction = UNNotificationAction(
             identifier: "OPEN_TASK",
             title: "Open Task",
@@ -34,6 +32,12 @@ final class UserNotificationService: NotificationService, @unchecked Sendable {
             options: []
         )
         center.setNotificationCategories([category])
+    }
+
+    func requestAuthorization() async throws -> Bool {
+        guard let center else { return false }
+        let options: UNAuthorizationOptions = [.alert, .badge, .sound]
+        return try await center.requestAuthorization(options: options)
     }
 
     func sendTaskNeedsInput(_ task: TaskRecord) async {

@@ -34,7 +34,7 @@ final class NotchShellController {
     private var collapseWorkItem: DispatchWorkItem?
     private var expandWorkItem: DispatchWorkItem?
 
-    private static let expandedSize = CGSize(width: 800, height: 340)
+    private static let expandedSize = CGSize(width: 800, height: 480)
 
     init(core: CompanionCore) {
         self.core = core
@@ -42,6 +42,7 @@ final class NotchShellController {
         let initialFrame = NSRect(x: 0, y: 0, width: Self.expandedSize.width, height: Self.expandedSize.height)
         self.panel = NotchPanel(contentRect: initialFrame)
         self.panel.contentView = NSHostingView(rootView: CompanionRootView(core: core))
+        self.panel.ignoresMouseEvents = !core.isExpanded
 
         bindState()
         installClickMonitors()
@@ -82,6 +83,7 @@ final class NotchShellController {
         core.$isExpanded
             .sink { [weak self] expanded in
                 guard let self else { return }
+                self.panel.ignoresMouseEvents = !expanded
                 self.panel.orderFrontRegardless()
                 if expanded {
                     self.panel.makeKey()
