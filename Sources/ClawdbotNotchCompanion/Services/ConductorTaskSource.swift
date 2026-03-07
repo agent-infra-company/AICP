@@ -69,7 +69,7 @@ final class ConductorTaskSource: TaskSource, @unchecked Sendable {
             FROM sessions s
             LEFT JOIN workspaces w ON s.workspace_id = w.id
             WHERE s.is_hidden = 0
-              AND (s.status IN ('working', 'needs_plan_response')
+              AND (s.status IN ('working', 'needs_plan_response', 'idle')
                    OR (s.status = 'error' AND w.state NOT IN ('archived')))
             ORDER BY s.updated_at DESC
             LIMIT 50

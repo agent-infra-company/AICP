@@ -48,9 +48,9 @@ struct DisplayTask: Identifiable, Hashable {
         case .running: return 1
         case .queued: return 2
         case .draft: return 3
+        case .completed: return 4
         case .failed: return 4
-        case .completed: return 5
-        case .canceled: return 6
+        case .canceled: return 4
         }
     }
 

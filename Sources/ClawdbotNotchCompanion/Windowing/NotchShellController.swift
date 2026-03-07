@@ -49,9 +49,9 @@ final class NotchShellController {
         installHoverMonitors()
         installScreenObserver()
         positionWindow()
-        updateNotchInfo()
         applyVisibilityPreferences()
         panel.orderFrontRegardless()
+        updateNotchInfo()
         NotchSpace.shared.addWindow(panel)
     }
 
@@ -81,9 +81,10 @@ final class NotchShellController {
 
     private func bindState() {
         core.$isExpanded
-            .sink { [weak self] expanded in
+            .combineLatest(core.$activeToast)
+            .sink { [weak self] expanded, toast in
                 guard let self else { return }
-                self.panel.ignoresMouseEvents = !expanded
+                self.panel.ignoresMouseEvents = !expanded && toast == nil
                 self.panel.orderFrontRegardless()
                 if expanded {
                     self.panel.makeKey()
@@ -258,10 +259,16 @@ final class NotchShellController {
     // MARK: - Notch Geometry
 
     private var primaryScreen: NSScreen? {
-        NSScreen.screens.first(where: { $0.safeAreaInsets.top > 0 })
-            ?? NSScreen.screens.first(where: { $0.frame.origin == .zero })
+        panel.screen
             ?? NSScreen.main
+            ?? NSScreen.screens.first(where: hasHardwareNotch)
+            ?? NSScreen.screens.first(where: { $0.frame.origin == .zero })
             ?? NSScreen.screens.first
+    }
+
+    private func hasHardwareNotch(_ screen: NSScreen) -> Bool {
+        screen.safeAreaInsets.top > 0
+            || (screen.auxiliaryTopLeftArea != nil && screen.auxiliaryTopRightArea != nil)
     }
 
     private func notchGeometry(for screen: NSScreen) -> NotchGeometry? {
@@ -275,16 +282,11 @@ final class NotchShellController {
     }
 
     private func detectNotchGeometry(screen: NSScreen) -> NotchGeometry? {
-        guard screen.safeAreaInsets.top > 0 else {
-            return nil
-        }
-
-        let notchHeight = screen.safeAreaInsets.top
-
         if let leftArea = screen.auxiliaryTopLeftArea,
            let rightArea = screen.auxiliaryTopRightArea {
             let notchWidth = screen.frame.width - leftArea.width - rightArea.width + 4
             if notchWidth > 0, notchWidth < screen.frame.width * 0.5 {
+                let notchHeight = max(screen.safeAreaInsets.top, min(leftArea.height, rightArea.height), 38)
                 return NotchGeometry(
                     notchWidth: notchWidth,
                     notchHeight: notchHeight,
@@ -293,10 +295,14 @@ final class NotchShellController {
             }
         }
 
+        guard screen.safeAreaInsets.top > 0 else {
+            return nil
+        }
+
         let estimatedNotchWidth: CGFloat = 210
         return NotchGeometry(
             notchWidth: estimatedNotchWidth,
-            notchHeight: notchHeight,
+            notchHeight: max(screen.safeAreaInsets.top, 38),
             screenFrame: screen.frame
         )
     }

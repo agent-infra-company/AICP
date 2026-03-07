@@ -57,6 +57,7 @@ struct CompanionRootView: View {
         .frame(width: windowWidth, height: core.showingFullTaskList ? fullListPanelHeight + glowPad : windowHeight, alignment: .top)
         .animation(expandSpring, value: core.isExpanded)
         .animation(expandSpring, value: core.showingFullTaskList)
+        .animation(.spring(response: 0.35, dampingFraction: 0.8), value: core.activeToast)
     }
 }
 
@@ -75,8 +76,16 @@ private struct CollapsedCompanionView: View {
 }
 
 private struct NotchOutlineShape: Shape {
-    let notchWidth: CGFloat
-    let wingWidth: CGFloat
+    var notchWidth: CGFloat
+    var wingWidth: CGFloat
+
+    var animatableData: AnimatablePair<CGFloat, CGFloat> {
+        get { AnimatablePair(notchWidth, wingWidth) }
+        set {
+            notchWidth = newValue.first
+            wingWidth = newValue.second
+        }
+    }
 
     func path(in rect: CGRect) -> Path {
         var path = Path()
@@ -105,6 +114,7 @@ private struct NotchOutlineShape: Shape {
 
 private struct NotchGradientCollapsedView: View {
     @ObservedObject var core: CompanionCore
+    @State private var toastExpanded = false
 
     private var info: NotchDisplayInfo { core.notchDisplayInfo }
     private var glowColor: Color { Color(hex: core.settings.glowColorHex) }
@@ -116,93 +126,206 @@ private struct NotchGradientCollapsedView: View {
         }
     }
 
+    private var effectiveNotchWidth: CGFloat {
+        toastExpanded ? toastExpandedWidth : info.notchWidth
+    }
+
+    private var effectiveWingWidth: CGFloat {
+        toastExpanded ? 0 : info.wingWidth
+    }
+
+    private var effectiveTotalWidth: CGFloat {
+        toastExpanded ? toastExpandedWidth : info.totalCollapsedWidth
+    }
+
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 30)) { context in
-            let t = context.date.timeIntervalSinceReferenceDate
-            let slowAngle = t.remainder(dividingBy: 8) / 8 * 360
-            let fastAngle = t.remainder(dividingBy: 5) / 5 * 360
+        ZStack(alignment: .top) {
+            TimelineView(.animation(minimumInterval: 1.0 / 30)) { context in
+                let t = context.date.timeIntervalSinceReferenceDate
+                let slowAngle = t.remainder(dividingBy: 8) / 8 * 360
+                let fastAngle = t.remainder(dividingBy: 5) / 5 * 360
 
-            ZStack {
-                if core.settings.notchStyle != .hidden {
-                    NotchOutlineShape(notchWidth: info.notchWidth, wingWidth: info.wingWidth)
-                        .stroke(glowColor.opacity(0.1 * intensityMultiplier), style: StrokeStyle(lineWidth: 36, lineCap: .round, lineJoin: .round))
-                        .blur(radius: 14)
+                ZStack {
+                    if core.settings.notchStyle != .hidden {
+                        NotchOutlineShape(notchWidth: effectiveNotchWidth, wingWidth: effectiveWingWidth)
+                            .stroke(glowColor.opacity(0.1 * intensityMultiplier), style: StrokeStyle(lineWidth: 36, lineCap: .round, lineJoin: .round))
+                            .blur(radius: 14)
 
-                    NotchOutlineShape(notchWidth: info.notchWidth, wingWidth: info.wingWidth)
-                        .stroke(glowColor.opacity(0.14 * intensityMultiplier), style: StrokeStyle(lineWidth: 22, lineCap: .round, lineJoin: .round))
-                        .blur(radius: 10)
+                        NotchOutlineShape(notchWidth: effectiveNotchWidth, wingWidth: effectiveWingWidth)
+                            .stroke(glowColor.opacity(0.14 * intensityMultiplier), style: StrokeStyle(lineWidth: 22, lineCap: .round, lineJoin: .round))
+                            .blur(radius: 10)
 
-                    NotchOutlineShape(notchWidth: info.notchWidth, wingWidth: info.wingWidth)
-                        .stroke(
-                            AngularGradient(
-                                colors: [
-                                    glowColor.opacity(0.4 * intensityMultiplier),
-                                    glowColor.opacity(0.06 * intensityMultiplier),
-                                    glowColor.opacity(0.35 * intensityMultiplier),
-                                    glowColor.opacity(0.06 * intensityMultiplier),
-                                    glowColor.opacity(0.4 * intensityMultiplier),
-                                ],
-                                center: UnitPoint(x: 0.5, y: 0),
-                                angle: .degrees(slowAngle)
-                            ),
-                            style: StrokeStyle(lineWidth: 7, lineCap: .round, lineJoin: .round)
-                        )
-                        .blur(radius: 3)
+                        NotchOutlineShape(notchWidth: effectiveNotchWidth, wingWidth: effectiveWingWidth)
+                            .stroke(
+                                AngularGradient(
+                                    colors: [
+                                        glowColor.opacity(0.4 * intensityMultiplier),
+                                        glowColor.opacity(0.06 * intensityMultiplier),
+                                        glowColor.opacity(0.35 * intensityMultiplier),
+                                        glowColor.opacity(0.06 * intensityMultiplier),
+                                        glowColor.opacity(0.4 * intensityMultiplier),
+                                    ],
+                                    center: UnitPoint(x: 0.5, y: 0),
+                                    angle: .degrees(slowAngle)
+                                ),
+                                style: StrokeStyle(lineWidth: 7, lineCap: .round, lineJoin: .round)
+                            )
+                            .blur(radius: 3)
 
-                    NotchOutlineShape(notchWidth: info.notchWidth, wingWidth: info.wingWidth)
-                        .stroke(
-                            AngularGradient(
-                                colors: [
-                                    glowColor.opacity(0.25 * intensityMultiplier),
-                                    Color.clear,
-                                    Color.clear,
-                                    glowColor.opacity(0.25 * intensityMultiplier),
-                                    Color.clear,
-                                    Color.clear,
-                                ],
-                                center: UnitPoint(x: 0.5, y: 0),
-                                angle: .degrees(-fastAngle)
-                            ),
-                            style: StrokeStyle(lineWidth: 5, lineCap: .round, lineJoin: .round)
-                        )
-                        .blur(radius: 2)
+                        NotchOutlineShape(notchWidth: effectiveNotchWidth, wingWidth: effectiveWingWidth)
+                            .stroke(
+                                AngularGradient(
+                                    colors: [
+                                        glowColor.opacity(0.25 * intensityMultiplier),
+                                        Color.clear,
+                                        Color.clear,
+                                        glowColor.opacity(0.25 * intensityMultiplier),
+                                        Color.clear,
+                                        Color.clear,
+                                    ],
+                                    center: UnitPoint(x: 0.5, y: 0),
+                                    angle: .degrees(-fastAngle)
+                                ),
+                                style: StrokeStyle(lineWidth: 5, lineCap: .round, lineJoin: .round)
+                            )
+                            .blur(radius: 2)
+                    }
                 }
             }
+            .frame(width: effectiveTotalWidth, height: info.notchHeight)
+
+            // Toast content overlay
+            if let toast = core.activeToast {
+                HStack(spacing: 8) {
+                    RiveAvatarView()
+                        .frame(width: 24, height: 24)
+                        .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+
+                    MarqueeText(
+                        text: toast.title,
+                        font: .system(size: 13, weight: .medium),
+                        color: .white.opacity(0.9),
+                        speed: 30,
+                        minimumCharacterCount: toastMarqueeCharacterThreshold
+                    )
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .layoutPriority(1)
+
+                    Text(toastStatusLabel(toast.status))
+                        .font(.system(size: 13, weight: .regular))
+                        .foregroundStyle(.white.opacity(0.5))
+                        .fixedSize()
+                }
+                .padding(.horizontal, 14)
+                .opacity(toastExpanded ? 1 : 0)
+                .frame(width: effectiveNotchWidth, height: info.notchHeight)
+                .background(Color.black)
+                .clipShape(
+                    UnevenRoundedRectangle(
+                        topLeadingRadius: 0,
+                        bottomLeadingRadius: toastBottomRadius,
+                        bottomTrailingRadius: toastBottomRadius,
+                        topTrailingRadius: 0,
+                        style: .continuous
+                    )
+                )
+                .contentShape(Rectangle())
+                .onTapGesture { core.handleToastTap() }
+            }
         }
-        .frame(width: info.totalCollapsedWidth, height: info.notchHeight)
+        .frame(width: toastExpandedWidth, height: info.notchHeight)
         .contentShape(Rectangle())
         .onTapGesture {
-            core.setExpanded(true)
+            if core.activeToast != nil {
+                core.handleToastTap()
+            } else {
+                core.setExpanded(true)
+            }
         }
+        .animation(.spring(response: 0.45, dampingFraction: 0.75), value: toastExpanded)
+        .onChange(of: core.activeToast) { _, newToast in
+            if newToast != nil {
+                toastExpanded = true
+            } else {
+                toastExpanded = false
+            }
+        }
+    }
+}
+
+private func toastStatusLabel(_ status: TaskStatus) -> String {
+    switch status {
+    case .completed: return "Done"
+    case .failed: return "Error"
+    case .needsInput: return "Needs input"
+    case .needsAttention: return "Attention"
+    case .running: return "Working..."
+    default: return "Updated"
     }
 }
 
 private struct PillCollapsedView: View {
     @ObservedObject var core: CompanionCore
+    @State private var toastExpanded = false
+
+    private var currentWidth: CGFloat {
+        toastExpanded ? toastExpandedWidth : 340
+    }
 
     var body: some View {
-        HStack(spacing: 10) {
-            Circle()
-                .fill(core.allNeedsInputCount == 0 ? Color.green : Color.orange)
-                .frame(width: 8, height: 8)
+        ZStack {
+            if core.activeToast == nil {
+                HStack(spacing: 10) {
+                    Circle()
+                        .fill(core.allNeedsInputCount == 0 ? Color.green : Color.orange)
+                        .frame(width: 8, height: 8)
 
-            Text("Clawdbot")
-                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    Text("Clawdbot")
+                        .font(.system(size: 12, weight: .semibold, design: .rounded))
 
-            Spacer(minLength: 8)
+                    Spacer(minLength: 8)
 
-            Text("\(core.allRunningCount) running")
-                .font(.system(size: 11, weight: .medium, design: .rounded))
-                .foregroundStyle(.secondary)
+                    Text("\(core.allRunningCount) running")
+                        .font(.system(size: 11, weight: .medium, design: .rounded))
+                        .foregroundStyle(.secondary)
 
-            if core.allNeedsInputCount > 0 {
-                Text("\(core.allNeedsInputCount) input")
-                    .font(.system(size: 11, weight: .medium, design: .rounded))
-                    .foregroundStyle(Color.orange)
+                    if core.allNeedsInputCount > 0 {
+                        Text("\(core.allNeedsInputCount) input")
+                            .font(.system(size: 11, weight: .medium, design: .rounded))
+                            .foregroundStyle(Color.orange)
+                    }
+                }
+                .padding(.horizontal, 14)
+                .transition(.opacity)
+            }
+
+            if let toast = core.activeToast {
+                HStack(spacing: 8) {
+                    RiveAvatarView()
+                        .frame(width: 24, height: 24)
+                        .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+
+                    MarqueeText(
+                        text: toast.title,
+                        font: .system(size: 13, weight: .medium),
+                        color: .white.opacity(0.9),
+                        speed: 30,
+                        minimumCharacterCount: toastMarqueeCharacterThreshold
+                    )
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .layoutPriority(1)
+
+                    Text(toastStatusLabel(toast.status))
+                        .font(.system(size: 13, weight: .regular))
+                        .foregroundStyle(.white.opacity(0.5))
+                        .fixedSize()
+                }
+                .padding(.horizontal, 14)
+                .opacity(toastExpanded ? 1 : 0)
+                .transition(.opacity)
             }
         }
-        .padding(.horizontal, 14)
-        .frame(width: 340, height: 38)
+        .frame(width: currentWidth, height: 38)
         .background(.ultraThinMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         .overlay(
@@ -211,7 +334,19 @@ private struct PillCollapsedView: View {
         )
         .contentShape(Rectangle())
         .onTapGesture {
-            core.setExpanded(true)
+            if core.activeToast != nil {
+                core.handleToastTap()
+            } else {
+                core.setExpanded(true)
+            }
+        }
+        .animation(.spring(response: 0.45, dampingFraction: 0.75), value: toastExpanded)
+        .onChange(of: core.activeToast) { _, newToast in
+            if newToast != nil {
+                toastExpanded = true
+            } else {
+                toastExpanded = false
+            }
         }
     }
 }
@@ -873,6 +1008,74 @@ private struct FullTaskListView: View {
                 }
             }
         }
+    }
+}
+
+// MARK: - Toast Constants & Marquee
+
+private let toastExpandedWidth: CGFloat = 480
+private let toastBottomRadius: CGFloat = 14
+private let toastMarqueeCharacterThreshold = 8
+
+private struct MarqueeText: View {
+    let text: String
+    let font: Font
+    let color: Color
+    let speed: Double
+    let minimumCharacterCount: Int
+
+    @State private var textWidth: CGFloat = 0
+    @State private var animationStart = Date()
+    private let gap: CGFloat = 40
+
+    var body: some View {
+        GeometryReader { geo in
+            let available = geo.size.width
+            let shouldScroll = text.count > minimumCharacterCount && textWidth > 0
+
+            if shouldScroll {
+                let totalCycle = textWidth + gap
+                let duration = max(totalCycle / max(speed, 1), 0.1)
+                TimelineView(.animation(minimumInterval: 1.0 / 60, paused: false)) { timeline in
+                    let elapsed = timeline.date.timeIntervalSince(animationStart)
+                    let phase = elapsed.truncatingRemainder(dividingBy: duration)
+                    let scrollOffset = -(phase / duration) * totalCycle
+                    HStack(spacing: gap) {
+                        marqueeLabel
+                        marqueeLabel
+                    }
+                    .offset(x: scrollOffset)
+                }
+                .frame(width: available, alignment: .leading)
+                .clipped()
+            } else {
+                marqueeLabel
+                    .frame(width: available, alignment: .leading)
+            }
+        }
+        .frame(height: 16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .onAppear {
+            animationStart = .now
+        }
+        .onChange(of: text) { _, _ in
+            animationStart = .now
+        }
+    }
+
+    private var marqueeLabel: some View {
+        Text(text)
+            .font(font)
+            .foregroundStyle(color)
+            .lineLimit(1)
+            .fixedSize()
+            .background(
+                GeometryReader { g in
+                    Color.clear
+                        .onAppear { textWidth = g.size.width }
+                        .onChange(of: g.size.width) { _, w in textWidth = w }
+                }
+            )
     }
 }
 

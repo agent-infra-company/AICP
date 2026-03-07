@@ -19,6 +19,18 @@ struct NotchDisplayInfo: Equatable {
     )
 }
 
+struct NotchToast: Equatable {
+    let id: UUID
+    let sourceKind: TaskSourceKind
+    let title: String
+    let status: TaskStatus
+    let displayTask: DisplayTask
+
+    static func == (lhs: NotchToast, rhs: NotchToast) -> Bool {
+        lhs.id == rhs.id
+    }
+}
+
 @MainActor
 final class CompanionCore: ObservableObject {
     enum Tab: String, CaseIterable, Identifiable {
@@ -48,6 +60,7 @@ final class CompanionCore: ObservableObject {
     @Published var notchDisplayInfo: NotchDisplayInfo = .noNotch
     @Published var isSubmitting: Bool = false
     @Published var externalSnapshots: [TaskSourceKind: [ExternalTaskSnapshot]] = [:]
+    @Published var activeToast: NotchToast?
 
     private let stateMachine = TaskStateMachine()
     private let gatewayClient: GatewayClient
@@ -61,6 +74,7 @@ final class CompanionCore: ObservableObject {
 
     private var eventTasks: [UUID: Task<Void, Never>] = [:]
     private var aggregatorTask: Task<Void, Never>?
+    private var toastDismissTask: Task<Void, Never>?
 
     init(
         gatewayClient: GatewayClient,
@@ -711,6 +725,45 @@ final class CompanionCore: ObservableObject {
         }
     }
 
+    func showToast(for snapshot: ExternalTaskSnapshot) {
+        let display = DisplayTask(from: snapshot)
+        let toast = NotchToast(
+            id: UUID(),
+            sourceKind: snapshot.sourceKind,
+            title: snapshot.title,
+            status: snapshot.status,
+            displayTask: display
+        )
+        toastDismissTask?.cancel()
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+            activeToast = toast
+        }
+        toastDismissTask = Task {
+            try? await Task.sleep(for: .seconds(4))
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                withAnimation(.easeOut(duration: 0.3)) {
+                    if self.activeToast?.id == toast.id {
+                        self.activeToast = nil
+                    }
+                }
+            }
+        }
+    }
+
+    func dismissToast() {
+        toastDismissTask?.cancel()
+        withAnimation(.easeOut(duration: 0.3)) {
+            activeToast = nil
+        }
+    }
+
+    func handleToastTap() {
+        guard let toast = activeToast else { return }
+        openTask(toast.displayTask)
+        dismissToast()
+    }
+
     private func startExternalTaskMonitoring() async {
         await taskSourceAggregator.startAll()
 
@@ -741,6 +794,9 @@ final class CompanionCore: ObservableObject {
                         Task { await notificationService.sendExternalTaskFailed(snapshot) }
                     default:
                         break
+                    }
+                    if !isExpanded {
+                        showToast(for: snapshot)
                     }
                 }
             }
