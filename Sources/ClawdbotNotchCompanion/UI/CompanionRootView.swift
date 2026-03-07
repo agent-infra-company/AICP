@@ -356,13 +356,14 @@ private struct ExpandedCompanionView: View {
                                     .frame(height: rolodexRowHeight)
                                 }
                             } else {
-                                RolodexTaskList(itemCount: displayTasks.count) { index in
+                                RolodexTaskList(
+                                    itemCount: displayTasks.count,
+                                    onTapIndex: { index in
+                                        core.openTask(displayTasks[index])
+                                    }
+                                ) { index in
                                     UnifiedTaskRow(task: displayTasks[index])
                                         .frame(height: rolodexRowHeight)
-                                        .contentShape(Rectangle())
-                                        .onTapGesture {
-                                            core.openTask(displayTasks[index])
-                                        }
                                 }
                             }
 
@@ -408,6 +409,7 @@ private struct ExpandedCompanionView: View {
 private struct RolodexTaskList<RowContent: View>: View {
     let itemCount: Int
     let rowContent: (Int) -> RowContent
+    let onTapIndex: (Int) -> Void
 
     @State private var topVisibleIndex: Int = 0
     @State private var dragOffset: CGFloat = 0
@@ -415,8 +417,13 @@ private struct RolodexTaskList<RowContent: View>: View {
 
     private let maxStepPerGesture = 4
 
-    init(itemCount: Int, @ViewBuilder rowContent: @escaping (Int) -> RowContent) {
+    init(
+        itemCount: Int,
+        onTapIndex: @escaping (Int) -> Void = { _ in },
+        @ViewBuilder rowContent: @escaping (Int) -> RowContent
+    ) {
         self.itemCount = max(itemCount, 1)
+        self.onTapIndex = onTapIndex
         self.rowContent = rowContent
     }
 
@@ -441,12 +448,12 @@ private struct RolodexTaskList<RowContent: View>: View {
         .offset(y: baseOffset + clampedDragOffset)
         .frame(height: rolodexViewportHeight, alignment: .top)
         .clipped()
-        .contentShape(Rectangle())
-        .overlay(
+        .background(
             ScrollWheelCaptureView { deltaY in
                 handleScrollWheel(deltaY: deltaY)
             }
         )
+        .contentShape(Rectangle())
         .gesture(
             DragGesture(minimumDistance: 2)
                 .onChanged { value in
@@ -543,6 +550,10 @@ private struct RolodexTaskList<RowContent: View>: View {
         if (0..<itemCount).contains(index) {
             rowContent(index)
                 .frame(height: rolodexRowHeight)
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    onTapIndex(index)
+                }
                 .opacity((relative == -1 || relative == rolodexVisibleRows) ? 0.58 : 1)
                 .scaleEffect((relative == -1 || relative == rolodexVisibleRows) ? 0.98 : 1, anchor: .center)
         } else {
@@ -579,22 +590,40 @@ private struct ScrollWheelCaptureView: NSViewRepresentable {
 
 private final class ScrollWheelNSView: NSView {
     var onScroll: ((CGFloat) -> Void)?
+    private var eventMonitor: Any?
 
-    override func scrollWheel(with event: NSEvent) {
-        onScroll?(event.scrollingDeltaY)
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        updateEventMonitor()
     }
 
-    // Pass through mouse events so SwiftUI tap gestures on task rows still fire
-    override func mouseDown(with event: NSEvent) {
-        nextResponder?.mouseDown(with: event)
+    override func removeFromSuperview() {
+        super.removeFromSuperview()
+        removeEventMonitor()
     }
 
-    override func mouseUp(with event: NSEvent) {
-        nextResponder?.mouseUp(with: event)
+    private func updateEventMonitor() {
+        removeEventMonitor()
+
+        guard window != nil else { return }
+        eventMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
+            guard let self else { return event }
+
+            let location = self.convert(event.locationInWindow, from: nil)
+            guard self.bounds.contains(location) else {
+                return event
+            }
+
+            self.onScroll?(event.scrollingDeltaY)
+            return nil
+        }
     }
 
-    override func mouseDragged(with event: NSEvent) {
-        nextResponder?.mouseDragged(with: event)
+    private func removeEventMonitor() {
+        if let eventMonitor {
+            NSEvent.removeMonitor(eventMonitor)
+            self.eventMonitor = nil
+        }
     }
 }
 

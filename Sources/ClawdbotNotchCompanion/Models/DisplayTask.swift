@@ -41,6 +41,19 @@ struct DisplayTask: Identifiable, Hashable {
         self.metadata = snapshot.metadata
     }
 
+    /// Sort priority: lower values appear first in the task list.
+    var sortPriority: Int {
+        switch status {
+        case .needsInput, .needsAttention: return 0
+        case .running: return 1
+        case .queued: return 2
+        case .draft: return 3
+        case .failed: return 4
+        case .completed: return 5
+        case .canceled: return 6
+        }
+    }
+
     var statusText: String {
         if let progress {
             return progress

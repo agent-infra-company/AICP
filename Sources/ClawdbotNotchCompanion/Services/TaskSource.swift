@@ -49,6 +49,36 @@ enum TaskSourceKind: String, Codable, CaseIterable, Identifiable, Hashable {
         case .claudeDesktop: "claude"
         }
     }
+
+    var activationBundleIdentifiers: [String] {
+        switch self {
+        case .openClaw:
+            []
+        case .conductor:
+            ["com.conductor.app"]
+        case .claudeCode:
+            ["com.apple.Terminal", "com.googlecode.iterm2"]
+        case .codex:
+            ["com.openai.codex"]
+        case .claudeDesktop:
+            ["com.anthropic.claudefordesktop"]
+        }
+    }
+
+    var activationApplicationPaths: [String] {
+        switch self {
+        case .openClaw:
+            []
+        case .conductor:
+            ["/Applications/Conductor.app"]
+        case .claudeCode:
+            ["/System/Applications/Utilities/Terminal.app", "/Applications/iTerm.app"]
+        case .codex:
+            ["/Applications/Codex.app"]
+        case .claudeDesktop:
+            ["/Applications/Claude.app"]
+        }
+    }
 }
 
 struct ExternalTaskSnapshot: Identifiable, Hashable {

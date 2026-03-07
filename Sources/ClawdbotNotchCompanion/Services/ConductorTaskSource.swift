@@ -118,7 +118,7 @@ final class ConductorTaskSource: TaskSource, @unchecked Sendable {
                 needsInputPrompt: taskStatus == .needsInput ? "Plan ready for review" : nil,
                 lastError: taskStatus == .failed ? "Session error" : nil,
                 updatedAt: updatedAt,
-                deepLinkURL: URL(string: "conductor://"),
+                deepLinkURL: nil,
                 metadata: metadata
             )
             snapshots.append(snapshot)

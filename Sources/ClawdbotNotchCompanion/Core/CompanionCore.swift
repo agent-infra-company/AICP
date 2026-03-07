@@ -128,7 +128,7 @@ final class CompanionCore: ObservableObject {
             .flatMap { $0 }
             .map { DisplayTask(from: $0) }
         return (openClawTasks + externalTasks)
-            .sorted(by: { $0.updatedAt > $1.updatedAt })
+            .sorted(by: displayTaskOrdering)
     }
 
     /// Tasks shown in the notch: all running/active first, then fill to 5 with recent terminal tasks.
@@ -151,7 +151,15 @@ final class CompanionCore: ObservableObject {
             .flatMap { $0 }
             .map { DisplayTask(from: $0) }
         return (openClawTasks + externalTasks)
-            .sorted(by: { $0.updatedAt > $1.updatedAt })
+            .sorted(by: displayTaskOrdering)
+    }
+
+    /// Sort by status priority first, then by most recently updated within each group.
+    private func displayTaskOrdering(_ a: DisplayTask, _ b: DisplayTask) -> Bool {
+        if a.sortPriority != b.sortPriority {
+            return a.sortPriority < b.sortPriority
+        }
+        return a.updatedAt > b.updatedAt
     }
 
     var allRunningCount: Int {
@@ -172,23 +180,56 @@ final class CompanionCore: ObservableObject {
         // Collapse the notch so the target app is visible and focused
         setExpanded(false)
 
+        if activateApp(for: displayTask) {
+            return
+        }
+
         if let url = displayTask.deepLinkURL {
             NSWorkspace.shared.open(url)
-        } else if displayTask.sourceKind == .claudeCode {
-            activateApp(bundleId: "com.apple.Terminal")
-        } else if displayTask.sourceKind == .codex {
-            activateApp(bundleId: "com.openai.codex")
-        } else if displayTask.sourceKind == .claudeDesktop {
-            activateApp(bundleId: "com.anthropic.claudefordesktop")
         }
     }
 
-    private func activateApp(bundleId: String) {
-        if let app = NSRunningApplication.runningApplications(withBundleIdentifier: bundleId).first {
-            app.activate()
-        } else if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleId) {
-            NSWorkspace.shared.openApplication(at: url, configuration: .init())
+    @discardableResult
+    private func activateApp(for displayTask: DisplayTask) -> Bool {
+        for bundleId in displayTask.sourceKind.activationBundleIdentifiers {
+            if activateApp(bundleId: bundleId) {
+                return true
+            }
         }
+
+        for appPath in displayTask.sourceKind.activationApplicationPaths {
+            guard FileManager.default.fileExists(atPath: appPath) else {
+                continue
+            }
+            openApplication(at: URL(fileURLWithPath: appPath))
+            return true
+        }
+
+        return false
+    }
+
+    @discardableResult
+    private func activateApp(bundleId: String) -> Bool {
+        let runningApps = NSRunningApplication.runningApplications(withBundleIdentifier: bundleId)
+            .filter { !$0.isTerminated }
+
+        if let app = runningApps.first {
+            app.unhide()
+            return app.activate(options: [.activateAllWindows])
+        }
+
+        if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleId) {
+            openApplication(at: url)
+            return true
+        }
+
+        return false
+    }
+
+    private func openApplication(at url: URL) {
+        let configuration = NSWorkspace.OpenConfiguration()
+        configuration.activates = true
+        NSWorkspace.shared.openApplication(at: url, configuration: configuration)
     }
 
     var selectedProfile: ProfileConfig? {
