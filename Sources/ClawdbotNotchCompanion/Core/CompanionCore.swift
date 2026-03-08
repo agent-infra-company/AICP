@@ -2,6 +2,7 @@ import AppKit
 import Combine
 import Foundation
 import SwiftUI
+import os.log
 
 struct NotchDisplayInfo: Equatable {
     let hasNotch: Bool
@@ -31,8 +32,47 @@ struct NotchToast: Equatable {
     }
 }
 
+struct ExternalSnapshotActivityDetector {
+    static func shouldAnnounce(old: ExternalTaskSnapshot?, new: ExternalTaskSnapshot) -> Bool {
+        guard let old else { return true }
+        guard old.id == new.id, old.sourceKind == new.sourceKind else { return true }
+
+        if old.status != new.status {
+            return true
+        }
+
+        let updatedRecently = new.updatedAt.timeIntervalSince(old.updatedAt) > 1
+        guard updatedRecently else { return false }
+
+        if new.status == .needsInput && old.status == .needsInput {
+            return true
+        }
+
+        return new.sourceKind == .codex
+            && old.sourceKind == .codex
+            && new.status == .running
+            && old.status == .running
+            && new.metadata["source"] == "cli"
+            && old.metadata["source"] == "cli"
+            && codexCLITurnChanged(old: old, new: new)
+    }
+
+    private static func codexCLITurnChanged(old: ExternalTaskSnapshot, new: ExternalTaskSnapshot) -> Bool {
+        let oldTurnId = old.metadata["turnId"]
+        let newTurnId = new.metadata["turnId"]
+
+        if let oldTurnId, let newTurnId {
+            return oldTurnId != newTurnId
+        }
+
+        return true
+    }
+}
+
 @MainActor
 final class CompanionCore: ObservableObject {
+    private static let log = CompanionDiagnostics.logger(category: "CompanionCore")
+
     enum Tab: String, CaseIterable, Identifiable {
         case compose = "Compose"
         case running = "Running"
@@ -185,6 +225,10 @@ final class CompanionCore: ObservableObject {
     }
 
     func openTask(_ displayTask: DisplayTask) {
+        Self.log.info(
+            "Opening task id=\(displayTask.id, privacy: .public) source=\(displayTask.sourceKind.rawValue, privacy: .public) title=\(displayTask.title, privacy: .public)"
+        )
+
         if displayTask.sourceKind == .openClaw {
             let rawId = String(displayTask.id.dropFirst("openclaw-".count))
             focusTask(rawId)
@@ -199,26 +243,43 @@ final class CompanionCore: ObservableObject {
         }
 
         if let url = displayTask.deepLinkURL {
+            Self.log.info(
+                "Falling back to deep link source=\(displayTask.sourceKind.rawValue, privacy: .public) url=\(url.absoluteString, privacy: .public)"
+            )
             NSWorkspace.shared.open(url)
+        } else {
+            Self.log.warning(
+                "No activation target or deep link available for source=\(displayTask.sourceKind.rawValue, privacy: .public)"
+            )
         }
     }
 
     @discardableResult
     private func activateApp(for displayTask: DisplayTask) -> Bool {
-        for bundleId in displayTask.sourceKind.activationBundleIdentifiers {
+        let bundleIdentifiers = displayTask.activationBundleIdentifiers
+        let applicationPaths = displayTask.activationApplicationPaths
+
+        Self.log.debug(
+            "Attempting activation source=\(displayTask.sourceKind.rawValue, privacy: .public) bundleIds=\(CompanionDiagnostics.joined(bundleIdentifiers), privacy: .public) paths=\(CompanionDiagnostics.joined(applicationPaths), privacy: .public)"
+        )
+
+        for bundleId in bundleIdentifiers {
             if activateApp(bundleId: bundleId) {
                 return true
             }
         }
 
-        for appPath in displayTask.sourceKind.activationApplicationPaths {
+        for appPath in applicationPaths {
             guard FileManager.default.fileExists(atPath: appPath) else {
+                Self.log.debug("Activation path missing path=\(appPath, privacy: .public)")
                 continue
             }
+            Self.log.info("Opening app by path path=\(appPath, privacy: .public)")
             openApplication(at: URL(fileURLWithPath: appPath))
             return true
         }
 
+        Self.log.warning("Activation failed for source=\(displayTask.sourceKind.rawValue, privacy: .public)")
         return false
     }
 
@@ -229,20 +290,29 @@ final class CompanionCore: ObservableObject {
 
         if let app = runningApps.first {
             app.unhide()
-            return app.activate(options: [.activateAllWindows])
+            let activated = app.activate(options: [.activateAllWindows])
+            Self.log.info(
+                "Activated running app bundleId=\(bundleId, privacy: .public) success=\(activated)"
+            )
+            return activated
         }
 
         if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleId) {
+            Self.log.info(
+                "Launching app from bundle identifier bundleId=\(bundleId, privacy: .public) url=\(url.path, privacy: .public)"
+            )
             openApplication(at: url)
             return true
         }
 
+        Self.log.warning("No app resolved for bundleId=\(bundleId, privacy: .public)")
         return false
     }
 
     private func openApplication(at url: URL) {
         let configuration = NSWorkspace.OpenConfiguration()
         configuration.activates = true
+        Self.log.debug("openApplication path=\(url.path, privacy: .public)")
         NSWorkspace.shared.openApplication(at: url, configuration: configuration)
     }
 
@@ -765,6 +835,7 @@ final class CompanionCore: ObservableObject {
     }
 
     private func startExternalTaskMonitoring() async {
+        Self.log.info("Starting external task monitoring")
         await taskSourceAggregator.startAll()
 
         aggregatorTask = Task { [weak self] in
@@ -784,17 +855,9 @@ final class CompanionCore: ObservableObject {
 
         for snapshot in newFlat {
             let old = oldFlat.first(where: { $0.id == snapshot.id && $0.sourceKind == snapshot.sourceKind })
-
-            if let old {
-                let statusChanged = old.status != snapshot.status
-                // Detect completed turns: status stayed .needsInput but updatedAt moved forward,
-                // meaning a full turn (user → assistant) happened between polls.
-                let turnCompleted = snapshot.status == .needsInput
-                    && old.status == .needsInput
-                    && snapshot.updatedAt.timeIntervalSince(old.updatedAt) > 1
-                guard statusChanged || turnCompleted else { continue }
+            guard ExternalSnapshotActivityDetector.shouldAnnounce(old: old, new: snapshot) else {
+                continue
             }
-            // New tasks (old == nil) always get a notification
 
             switch snapshot.status {
             case .running, .queued:

@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import os.log
 
 struct CursorProcessSnapshotParser {
     enum Role: String, CaseIterable, Hashable, Comparable {
@@ -64,6 +65,8 @@ struct CursorProcessSnapshotParser {
 final class CursorTaskSource: TaskSource, @unchecked Sendable {
     let sourceKind: TaskSourceKind = .cursor
 
+    private static let log = CompanionDiagnostics.logger(category: "CursorTaskSource")
+
     private let bundleIdentifier = "com.todesktop.230313mzl4w4u92"
     private let pollInterval: TimeInterval
     private var isRunning = false
@@ -74,9 +77,17 @@ final class CursorTaskSource: TaskSource, @unchecked Sendable {
     }
 
     func isAvailable() async -> Bool {
-        NSWorkspace.shared.runningApplications.contains {
+        let isRunning = NSWorkspace.shared.runningApplications.contains {
             $0.bundleIdentifier == bundleIdentifier
-        } || FileManager.default.fileExists(atPath: "/Applications/Cursor.app")
+        }
+        let isInstalled = FileManager.default.fileExists(atPath: "/Applications/Cursor.app")
+        let available = isRunning || isInstalled
+
+        Self.log.debug(
+            "Availability available=\(available) running=\(isRunning) installed=\(isInstalled) bundleIdentifier=\(self.bundleIdentifier, privacy: .public)"
+        )
+
+        return available
     }
 
     func startMonitoring() async -> AsyncStream<[ExternalTaskSnapshot]> {
@@ -107,17 +118,35 @@ final class CursorTaskSource: TaskSource, @unchecked Sendable {
         let isCursorRunning = NSWorkspace.shared.runningApplications.contains {
             $0.bundleIdentifier == bundleIdentifier
         }
-        guard isCursorRunning else { return [] }
+        guard isCursorRunning else {
+            Self.log.debug("Cursor scan skipped because app is not running")
+            return []
+        }
 
-        guard let output = runCommand("/bin/ps", arguments: ["-axo", "command="]) else {
+        guard let output = runCommand("/bin/ps", arguments: ["-axo", "command="], label: "ps") else {
             return []
         }
 
         var rolesByWorkspace: [String: Set<CursorProcessSnapshotParser.Role>] = [:]
+        let lines = output.components(separatedBy: "\n")
+        let cursorLines = lines.filter { $0.localizedCaseInsensitiveContains("Cursor") }
+        var matchedActivities = 0
 
-        for line in output.components(separatedBy: "\n") {
+        for line in lines {
             guard let activity = parser.parse(line: line) else { continue }
+            matchedActivities += 1
             rolesByWorkspace[activity.workspace, default: []].insert(activity.role)
+        }
+
+        if rolesByWorkspace.isEmpty {
+            let sample = cursorLines.prefix(5).joined(separator: " || ")
+            Self.log.warning(
+                "Cursor is running but no extension-host activity matched matchedActivities=\(matchedActivities) sample=\(sample, privacy: .public)"
+            )
+        } else {
+            Self.log.debug(
+                "Cursor scan complete workspaces=\(rolesByWorkspace.count) matchedActivities=\(matchedActivities)"
+            )
         }
 
         return rolesByWorkspace.keys.sorted().map { workspace in
@@ -141,21 +170,7 @@ final class CursorTaskSource: TaskSource, @unchecked Sendable {
         }
     }
 
-    private func runCommand(_ path: String, arguments: [String]) -> String? {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: path)
-        process.arguments = arguments
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = FileHandle.nullDevice
-
-        do {
-            try process.run()
-            process.waitUntilExit()
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            return String(data: data, encoding: .utf8)
-        } catch {
-            return nil
-        }
+    private func runCommand(_ path: String, arguments: [String], label: String) -> String? {
+        ProcessProbe.run(path: path, arguments: arguments, logger: Self.log, label: label)
     }
 }

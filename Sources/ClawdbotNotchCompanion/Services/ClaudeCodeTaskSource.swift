@@ -18,8 +18,15 @@ final class ClaudeCodeTaskSource: TaskSource, @unchecked Sendable {
     func isAvailable() async -> Bool {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         let claudeStateDirectory = "\(home)/.claude"
-        return claudeBinaryCandidates().contains { FileManager.default.fileExists(atPath: $0) }
-            || FileManager.default.fileExists(atPath: claudeStateDirectory)
+        let installedBinaries = claudeBinaryCandidates().filter { FileManager.default.fileExists(atPath: $0) }
+        let hasStateDirectory = FileManager.default.fileExists(atPath: claudeStateDirectory)
+        let available = !installedBinaries.isEmpty || hasStateDirectory
+
+        Self.log.debug(
+            "Availability available=\(available) binaries=\(CompanionDiagnostics.joined(installedBinaries), privacy: .public) stateDirectory=\(claudeStateDirectory, privacy: .public) stateExists=\(hasStateDirectory)"
+        )
+
+        return available
     }
 
     func startMonitoring() async -> AsyncStream<[ExternalTaskSnapshot]> {
@@ -48,7 +55,7 @@ final class ClaudeCodeTaskSource: TaskSource, @unchecked Sendable {
     }
 
     private func scanProcesses() async -> [ExternalTaskSnapshot] {
-        let output = runCommand("/bin/ps", arguments: ["-axo", "pid=,command="])
+        let output = runCommand("/bin/ps", arguments: ["-axo", "pid=,command="], label: "ps")
         guard let output else {
             Self.log.warning("ps command returned nil output")
             return []
@@ -56,14 +63,20 @@ final class ClaudeCodeTaskSource: TaskSource, @unchecked Sendable {
 
         var snapshots: [ExternalTaskSnapshot] = []
         let lines = output.components(separatedBy: "\n")
+        let candidateLines = lines.filter { $0.localizedCaseInsensitiveContains("claude") }
+        var skippedConductorProcesses = 0
 
         for line in lines {
             guard isClaudeCLIProcess(line) else { continue }
+            guard !isConductorManagedClaudeProcess(line) else {
+                skippedConductorProcesses += 1
+                continue
+            }
 
             let pid = extractPID(from: line)
             let cwd = pid.flatMap { extractCWD(pid: $0) }
 
-            Self.log.info("Detected claude process: pid=\(pid ?? 0) cwd=\(cwd ?? "nil", privacy: .public)")
+            Self.log.debug("Detected claude process: pid=\(pid ?? 0) cwd=\(cwd ?? "nil", privacy: .public)")
 
             let workspaceName = cwd.map { URL(fileURLWithPath: $0).lastPathComponent }
 
@@ -76,7 +89,7 @@ final class ClaudeCodeTaskSource: TaskSource, @unchecked Sendable {
                 sessionInfo = cwd.flatMap { localReader.readActiveSessionForCWD($0) }
             }
 
-            Self.log.info("  session=\(sessionInfo?.sessionId ?? "none", privacy: .public) status=\(String(describing: sessionInfo?.detectedStatus), privacy: .public) title=\(sessionInfo?.title ?? "N/A", privacy: .public)")
+            Self.log.debug("  session=\(sessionInfo?.sessionId ?? "none", privacy: .public) status=\(String(describing: sessionInfo?.detectedStatus), privacy: .public) title=\(sessionInfo?.title ?? "N/A", privacy: .public)")
 
             var metadata: [String: String] = [:]
             if let cwd { metadata["cwd"] = cwd }
@@ -128,7 +141,16 @@ final class ClaudeCodeTaskSource: TaskSource, @unchecked Sendable {
             snapshots.append(snapshot)
         }
 
-        Self.log.info("ClaudeCode scan complete: \(snapshots.count) snapshots")
+        if skippedConductorProcesses > 0 {
+            Self.log.debug("Skipped \(skippedConductorProcesses) Conductor-managed claude processes")
+        }
+        if snapshots.isEmpty && !candidateLines.isEmpty {
+            let sample = candidateLines.prefix(5).joined(separator: " || ")
+            Self.log.warning(
+                "Claude-related processes found but no standalone Claude Code snapshots were produced sample=\(sample, privacy: .public)"
+            )
+        }
+        Self.log.debug("ClaudeCode scan complete: \(snapshots.count) snapshots")
         return snapshots
     }
 
@@ -168,6 +190,11 @@ final class ClaudeCodeTaskSource: TaskSource, @unchecked Sendable {
         return token.map(String.init)
     }
 
+    private func isConductorManagedClaudeProcess(_ line: String) -> Bool {
+        line.contains("com.conductor.app")
+            || line.contains("/Library/Application Support/com.conductor.app/bin/claude")
+    }
+
     private func extractPID(from psLine: String) -> Int? {
         let components = psLine.split(separator: " ", omittingEmptySubsequences: true)
         guard let pidComponent = components.first else { return nil }
@@ -175,13 +202,18 @@ final class ClaudeCodeTaskSource: TaskSource, @unchecked Sendable {
     }
 
     private func extractCWD(pid: Int) -> String? {
-        let output = runCommand("/usr/sbin/lsof", arguments: ["-a", "-p", "\(pid)", "-Fn", "-d", "cwd"])
+        let output = runCommand(
+            "/usr/sbin/lsof",
+            arguments: ["-a", "-p", "\(pid)", "-Fn", "-d", "cwd"],
+            label: "lsof"
+        )
         guard let output else { return nil }
         for line in output.components(separatedBy: "\n") {
             if line.hasPrefix("n") && line.count > 1 {
                 return String(line.dropFirst())
             }
         }
+        Self.log.debug("No CWD discovered for pid=\(pid)")
         return nil
     }
 
@@ -194,21 +226,7 @@ final class ClaudeCodeTaskSource: TaskSource, @unchecked Sendable {
         ]
     }
 
-    private func runCommand(_ path: String, arguments: [String]) -> String? {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: path)
-        process.arguments = arguments
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = FileHandle.nullDevice
-
-        do {
-            try process.run()
-            process.waitUntilExit()
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            return String(data: data, encoding: .utf8)
-        } catch {
-            return nil
-        }
+    private func runCommand(_ path: String, arguments: [String], label: String) -> String? {
+        ProcessProbe.run(path: path, arguments: arguments, logger: Self.log, label: label)
     }
 }

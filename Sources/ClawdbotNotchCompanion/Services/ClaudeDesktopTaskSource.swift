@@ -1,8 +1,11 @@
 import AppKit
 import Foundation
+import os.log
 
 final class ClaudeDesktopTaskSource: TaskSource, @unchecked Sendable {
     let sourceKind: TaskSourceKind = .claudeDesktop
+
+    private static let log = CompanionDiagnostics.logger(category: "ClaudeDesktopTaskSource")
 
     private let bundleIdentifier = "com.anthropic.claudefordesktop"
     private let pollInterval: TimeInterval
@@ -18,10 +21,18 @@ final class ClaudeDesktopTaskSource: TaskSource, @unchecked Sendable {
     }
 
     func isAvailable() async -> Bool {
-        NSWorkspace.shared.runningApplications.contains {
+        let isRunning = NSWorkspace.shared.runningApplications.contains {
             $0.bundleIdentifier == bundleIdentifier
-        } || FileManager.default.fileExists(atPath: "/Applications/Claude.app")
-            || localReader.hasLocalSessions()
+        }
+        let isInstalled = FileManager.default.fileExists(atPath: "/Applications/Claude.app")
+        let hasLocalSessions = localReader.hasLocalSessions()
+        let available = isRunning || isInstalled || hasLocalSessions
+
+        Self.log.debug(
+            "Availability available=\(available) running=\(isRunning) installed=\(isInstalled) localSessions=\(hasLocalSessions)"
+        )
+
+        return available
     }
 
     func startMonitoring() async -> AsyncStream<[ExternalTaskSnapshot]> {
@@ -58,7 +69,14 @@ final class ClaudeDesktopTaskSource: TaskSource, @unchecked Sendable {
                 session.status == .running || Date().timeIntervalSince(session.lastActivityAt) < 7200
             }
 
+        Self.log.debug(
+            "Read recent sessions running=\(isDesktopRunning) eligibleSessions=\(sessions.count)"
+        )
+
         if sessions.isEmpty {
+            if isDesktopRunning {
+                Self.log.debug("Using Claude Desktop fallback snapshot because no recent local sessions were found")
+            }
             return isDesktopRunning ? fallbackSnapshot() : []
         }
 

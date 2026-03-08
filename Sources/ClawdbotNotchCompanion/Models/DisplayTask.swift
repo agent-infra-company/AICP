@@ -69,4 +69,18 @@ struct DisplayTask: Identifiable, Hashable {
         case .draft: return "Draft"
         }
     }
+
+    var activationBundleIdentifiers: [String] {
+        if sourceKind == .codex, metadata["source"] == "cli" {
+            return TaskSourceKind.claudeCode.activationBundleIdentifiers
+        }
+        return sourceKind.activationBundleIdentifiers
+    }
+
+    var activationApplicationPaths: [String] {
+        if sourceKind == .codex, metadata["source"] == "cli" {
+            return TaskSourceKind.claudeCode.activationApplicationPaths
+        }
+        return sourceKind.activationApplicationPaths
+    }
 }

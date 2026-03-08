@@ -1,8 +1,11 @@
 import Foundation
 import SQLite3
+import os.log
 
 final class ConductorTaskSource: TaskSource, @unchecked Sendable {
     let sourceKind: TaskSourceKind = .conductor
+
+    private static let log = CompanionDiagnostics.logger(category: "ConductorTaskSource")
 
     private let dbPath: String
     private let pollInterval: TimeInterval
@@ -27,7 +30,9 @@ final class ConductorTaskSource: TaskSource, @unchecked Sendable {
     }
 
     func isAvailable() async -> Bool {
-        FileManager.default.fileExists(atPath: dbPath)
+        let exists = FileManager.default.fileExists(atPath: dbPath)
+        Self.log.debug("Availability available=\(exists) dbPath=\(self.dbPath, privacy: .public)")
+        return exists
     }
 
     func startMonitoring() async -> AsyncStream<[ExternalTaskSnapshot]> {
@@ -58,6 +63,7 @@ final class ConductorTaskSource: TaskSource, @unchecked Sendable {
     private func pollDatabase() -> [ExternalTaskSnapshot] {
         var db: OpaquePointer?
         guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX, nil) == SQLITE_OK else {
+            Self.log.error("Failed to open conductor DB path=\(self.dbPath, privacy: .public)")
             return []
         }
         defer { sqlite3_close(db) }
@@ -77,6 +83,8 @@ final class ConductorTaskSource: TaskSource, @unchecked Sendable {
 
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, query, -1, &stmt, nil) == SQLITE_OK else {
+            let message = db.flatMap { sqlite3_errmsg($0) }.map { String(cString: $0) } ?? "unknown"
+            Self.log.error("Failed to prepare conductor query error=\(message, privacy: .public)")
             return []
         }
         defer { sqlite3_finalize(stmt) }
@@ -124,6 +132,7 @@ final class ConductorTaskSource: TaskSource, @unchecked Sendable {
             snapshots.append(snapshot)
         }
 
+        Self.log.debug("Poll complete snapshots=\(snapshots.count)")
         return snapshots
     }
 

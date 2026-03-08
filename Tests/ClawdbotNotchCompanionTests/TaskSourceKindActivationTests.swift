@@ -12,6 +12,54 @@ final class TaskSourceKindActivationTests: XCTestCase {
         XCTAssertEqual(TaskSourceKind.codex.activationApplicationPaths, ["/Applications/Codex.app"])
     }
 
+    func testCodexCLIExternalTasksPreferTerminalActivation() {
+        let snapshot = ExternalTaskSnapshot(
+            id: "codex-thread",
+            sourceKind: .codex,
+            title: "CLI task",
+            workspace: "Projects",
+            status: .running,
+            progress: "Working...",
+            needsInputPrompt: nil,
+            lastError: nil,
+            updatedAt: Date(),
+            deepLinkURL: nil,
+            metadata: ["source": "cli"]
+        )
+
+        let task = DisplayTask(from: snapshot)
+
+        XCTAssertEqual(
+            task.activationBundleIdentifiers,
+            ["com.apple.Terminal", "com.googlecode.iterm2"]
+        )
+        XCTAssertEqual(
+            task.activationApplicationPaths,
+            ["/System/Applications/Utilities/Terminal.app", "/Applications/iTerm.app"]
+        )
+    }
+
+    func testCodexAppTasksKeepCodexActivationTargets() {
+        let snapshot = ExternalTaskSnapshot(
+            id: "codex-thread",
+            sourceKind: .codex,
+            title: "App task",
+            workspace: "Projects",
+            status: .running,
+            progress: "Working...",
+            needsInputPrompt: nil,
+            lastError: nil,
+            updatedAt: Date(),
+            deepLinkURL: nil,
+            metadata: ["source": "vscode"]
+        )
+
+        let task = DisplayTask(from: snapshot)
+
+        XCTAssertEqual(task.activationBundleIdentifiers, ["com.openai.codex"])
+        XCTAssertEqual(task.activationApplicationPaths, ["/Applications/Codex.app"])
+    }
+
     func testClaudeDesktopActivationTargetsMatchDesktopApp() {
         XCTAssertEqual(TaskSourceKind.claudeDesktop.activationBundleIdentifiers, ["com.anthropic.claudefordesktop"])
         XCTAssertEqual(TaskSourceKind.claudeDesktop.activationApplicationPaths, ["/Applications/Claude.app"])

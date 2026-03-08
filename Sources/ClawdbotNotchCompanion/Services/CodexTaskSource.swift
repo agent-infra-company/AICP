@@ -1,9 +1,12 @@
 import AppKit
 import Foundation
 import SQLite3
+import os.log
 
 final class CodexTaskSource: TaskSource, @unchecked Sendable {
     let sourceKind: TaskSourceKind = .codex
+
+    private static let log = CompanionDiagnostics.logger(category: "CodexTaskSource")
 
     private let bundleIdentifier = "com.openai.codex"
     private let dbPath: String
@@ -17,9 +20,16 @@ final class CodexTaskSource: TaskSource, @unchecked Sendable {
     }
 
     func isAvailable() async -> Bool {
-        FileManager.default.fileExists(atPath: dbPath)
-            || NSWorkspace.shared.runningApplications.contains { $0.bundleIdentifier == bundleIdentifier }
-            || FileManager.default.fileExists(atPath: "/Applications/Codex.app")
+        let existingDatabases = codexDatabaseCandidates().filter { FileManager.default.fileExists(atPath: $0) }
+        let isAppRunning = NSWorkspace.shared.runningApplications.contains { $0.bundleIdentifier == bundleIdentifier }
+        let isInstalled = FileManager.default.fileExists(atPath: "/Applications/Codex.app")
+        let available = !existingDatabases.isEmpty || isAppRunning || isInstalled
+
+        Self.log.debug(
+            "Availability available=\(available) appRunning=\(isAppRunning) installed=\(isInstalled) dbPath=\(self.dbPath, privacy: .public) existingDatabases=\(CompanionDiagnostics.joined(existingDatabases), privacy: .public)"
+        )
+
+        return available
     }
 
     func startMonitoring() async -> AsyncStream<[ExternalTaskSnapshot]> {
@@ -51,14 +61,19 @@ final class CodexTaskSource: TaskSource, @unchecked Sendable {
 
     private func pollDatabase() -> [ExternalTaskSnapshot] {
         guard FileManager.default.fileExists(atPath: dbPath) else {
-            print("[CodexTaskSource] DB not found at \(dbPath)")
+            Self.log.warning(
+                "Primary Codex DB missing path=\(self.dbPath, privacy: .public) candidates=\(CompanionDiagnostics.joined(self.codexDatabaseCandidates()), privacy: .public)"
+            )
             return checkPresenceFallback()
         }
 
         var db: OpaquePointer?
         let rc = sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX, nil)
         guard rc == SQLITE_OK else {
-            print("[CodexTaskSource] sqlite3_open_v2 failed: \(rc)")
+            let message = db.flatMap { sqlite3_errmsg($0) }.map { String(cString: $0) } ?? "unknown"
+            Self.log.error(
+                "Failed to open Codex DB path=\(self.dbPath, privacy: .public) rc=\(rc) error=\(message, privacy: .public)"
+            )
             return checkPresenceFallback()
         }
         defer { sqlite3_close(db) }
@@ -67,7 +82,9 @@ final class CodexTaskSource: TaskSource, @unchecked Sendable {
         let isDesktopAppRunning = NSWorkspace.shared.runningApplications.contains {
             $0.bundleIdentifier == bundleIdentifier
         }
-        print("[CodexTaskSource] poll: runningWorkspaces=\(runningWorkspaces), isDesktopAppRunning=\(isDesktopAppRunning)")
+        Self.log.debug(
+            "Polling Codex DB runningWorkspaces=\(CompanionDiagnostics.joined(runningWorkspaces.sorted()), privacy: .public) desktopRunning=\(isDesktopAppRunning)"
+        )
 
         var snapshots: [ExternalTaskSnapshot] = []
 
@@ -83,9 +100,13 @@ final class CodexTaskSource: TaskSource, @unchecked Sendable {
         let jobSnapshots = queryAgentJobs(db: db)
         snapshots.append(contentsOf: jobSnapshots)
 
-        print("[CodexTaskSource] total snapshots: \(snapshots.count) (threads=\(threadSnapshots.count), jobs=\(jobSnapshots.count))")
-        for s in snapshots.prefix(3) {
-            print("[CodexTaskSource]   \(s.id) status=\(s.status) title=\(s.title.prefix(40))")
+        Self.log.debug(
+            "Poll complete totalSnapshots=\(snapshots.count) threadSnapshots=\(threadSnapshots.count) jobSnapshots=\(jobSnapshots.count)"
+        )
+        for snapshot in snapshots.prefix(3) {
+            Self.log.debug(
+                "Snapshot id=\(snapshot.id, privacy: .public) status=\(String(describing: snapshot.status), privacy: .public) title=\(snapshot.title, privacy: .public)"
+            )
         }
 
         return snapshots
@@ -97,7 +118,7 @@ final class CodexTaskSource: TaskSource, @unchecked Sendable {
         isDesktopAppRunning: Bool
     ) -> [ExternalTaskSnapshot] {
         let query = """
-            SELECT id, title, cwd, model_provider, approval_mode,
+            SELECT id, rollout_path, title, cwd, model_provider, approval_mode,
                    updated_at, git_branch, tokens_used, cli_version,
                    first_user_message, agent_nickname, source
             FROM threads
@@ -107,24 +128,29 @@ final class CodexTaskSource: TaskSource, @unchecked Sendable {
             """
 
         var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, query, -1, &stmt, nil) == SQLITE_OK else { return [] }
+        guard sqlite3_prepare_v2(db, query, -1, &stmt, nil) == SQLITE_OK else {
+            let message = db.flatMap { sqlite3_errmsg($0) }.map { String(cString: $0) } ?? "unknown"
+            Self.log.error("Failed to prepare Codex thread query error=\(message, privacy: .public)")
+            return []
+        }
         defer { sqlite3_finalize(stmt) }
 
         var snapshots: [ExternalTaskSnapshot] = []
 
         while sqlite3_step(stmt) == SQLITE_ROW {
             let threadId = columnText(stmt, 0) ?? ""
-            let rawTitle = columnText(stmt, 1) ?? "Untitled"
-            let cwd = columnText(stmt, 2)
-            let modelProvider = columnText(stmt, 3) ?? ""
-            let approvalMode = columnText(stmt, 4) ?? ""
-            let updatedAt = sqlite3_column_int64(stmt, 5)
-            let gitBranch = columnText(stmt, 6)
-            let tokensUsed = sqlite3_column_int64(stmt, 7)
-            let cliVersion = columnText(stmt, 8)
-            let firstUserMessage = columnText(stmt, 9)
-            let agentNickname = columnText(stmt, 10)
-            let source = columnText(stmt, 11) ?? ""
+            let rolloutPath = columnText(stmt, 1)
+            let rawTitle = columnText(stmt, 2) ?? "Untitled"
+            let cwd = columnText(stmt, 3)
+            let modelProvider = columnText(stmt, 4) ?? ""
+            let approvalMode = columnText(stmt, 5) ?? ""
+            let updatedAt = sqlite3_column_int64(stmt, 6)
+            let gitBranch = columnText(stmt, 7)
+            let tokensUsed = sqlite3_column_int64(stmt, 8)
+            let cliVersion = columnText(stmt, 9)
+            let firstUserMessage = columnText(stmt, 10)
+            let agentNickname = columnText(stmt, 11)
+            let source = columnText(stmt, 12) ?? ""
 
             if isConductorManagedThread(firstUserMessage: firstUserMessage) {
                 continue
@@ -137,13 +163,15 @@ final class CodexTaskSource: TaskSource, @unchecked Sendable {
 
             let updatedDate = Date(timeIntervalSince1970: TimeInterval(updatedAt))
             let age = Date().timeIntervalSince(updatedDate)
-            let isActiveCLIWorkspace = cwd.map { runningWorkspaces.contains($0) } ?? false
-            let status: TaskStatus
-            if isActiveCLIWorkspace || (isDesktopAppRunning && age < 1800) {
-                status = .running
-            } else {
-                status = .completed
-            }
+            let cliRolloutState = source == "cli" ? rolloutPath.flatMap(Self.cliRolloutState(atPath:)) : nil
+            let status = Self.statusForThread(
+                source: source,
+                cwd: cwd,
+                rolloutState: cliRolloutState,
+                runningWorkspaces: runningWorkspaces,
+                isDesktopAppRunning: isDesktopAppRunning,
+                updatedDate: updatedDate
+            )
 
             // Skip old completed threads (only show last hour)
             if status == .completed && age > 3600 { continue }
@@ -158,6 +186,7 @@ final class CodexTaskSource: TaskSource, @unchecked Sendable {
             if let cliVersion { metadata["cliVersion"] = cliVersion }
             if let agentNickname { metadata["agentNickname"] = agentNickname }
             if let cwd { metadata["cwd"] = cwd }
+            if let turnId = cliRolloutState?.turnId { metadata["turnId"] = turnId }
 
             // Build progress string
             var progressParts: [String] = []
@@ -193,6 +222,11 @@ final class CodexTaskSource: TaskSource, @unchecked Sendable {
             snapshots.append(snapshot)
         }
 
+        if snapshots.isEmpty {
+            Self.log.debug(
+                "No Codex thread snapshots were eligible runningWorkspaces=\(CompanionDiagnostics.joined(runningWorkspaces.sorted()), privacy: .public) desktopRunning=\(isDesktopAppRunning)"
+            )
+        }
         return snapshots
     }
 
@@ -206,7 +240,11 @@ final class CodexTaskSource: TaskSource, @unchecked Sendable {
             """
 
         var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, query, -1, &stmt, nil) == SQLITE_OK else { return [] }
+        guard sqlite3_prepare_v2(db, query, -1, &stmt, nil) == SQLITE_OK else {
+            let message = db.flatMap { sqlite3_errmsg($0) }.map { String(cString: $0) } ?? "unknown"
+            Self.log.error("Failed to prepare Codex agent job query error=\(message, privacy: .public)")
+            return []
+        }
         defer { sqlite3_finalize(stmt) }
 
         var snapshots: [ExternalTaskSnapshot] = []
@@ -252,6 +290,101 @@ final class CodexTaskSource: TaskSource, @unchecked Sendable {
         }
     }
 
+    static func statusForThread(
+        source: String,
+        cwd: String?,
+        rolloutPath: String?,
+        runningWorkspaces: Set<String>,
+        isDesktopAppRunning: Bool,
+        updatedDate: Date,
+        now: Date = Date()
+    ) -> TaskStatus {
+        let rolloutState = rolloutPath.flatMap(cliRolloutState(atPath:))
+        return statusForThread(
+            source: source,
+            cwd: cwd,
+            rolloutState: rolloutState,
+            runningWorkspaces: runningWorkspaces,
+            isDesktopAppRunning: isDesktopAppRunning,
+            updatedDate: updatedDate,
+            now: now
+        )
+    }
+
+    static func statusForThread(
+        source: String,
+        cwd: String?,
+        rolloutState: CodexCLIRolloutState?,
+        runningWorkspaces: Set<String>,
+        isDesktopAppRunning: Bool,
+        updatedDate: Date,
+        now: Date = Date()
+    ) -> TaskStatus {
+        let age = now.timeIntervalSince(updatedDate)
+        let isActiveCLIWorkspace = cwd.map { runningWorkspaces.contains($0) } ?? false
+
+        if source == "cli" {
+            if let rolloutState {
+                return rolloutState.status
+            }
+            return isActiveCLIWorkspace ? .running : .completed
+        }
+
+        if isActiveCLIWorkspace || (isDesktopAppRunning && age < 1800) {
+            return .running
+        }
+
+        return .completed
+    }
+
+    static func cliRolloutState(atPath path: String) -> CodexCLIRolloutState? {
+        guard let tail = readRolloutTail(atPath: path, maxBytes: 65_536) else {
+            return nil
+        }
+
+        let decoder = JSONDecoder()
+        let lines = tail.split(separator: "\n", omittingEmptySubsequences: false)
+
+        for line in lines.reversed() where !line.isEmpty {
+            guard let data = String(line).data(using: .utf8),
+                  let event = try? decoder.decode(CodexRolloutEvent.self, from: data) else {
+                continue
+            }
+
+            guard event.type == "event_msg" else { continue }
+
+            switch event.payload.type {
+            case "task_started":
+                return CodexCLIRolloutState(status: .running, turnId: event.payload.turnId)
+            case "task_complete":
+                return CodexCLIRolloutState(status: .completed, turnId: event.payload.turnId)
+            case "turn_aborted":
+                return CodexCLIRolloutState(status: .canceled, turnId: event.payload.turnId)
+            default:
+                continue
+            }
+        }
+
+        return nil
+    }
+
+    private static func readRolloutTail(atPath path: String, maxBytes: Int) -> String? {
+        guard let handle = FileHandle(forReadingAtPath: path) else { return nil }
+        defer {
+            try? handle.close()
+        }
+
+        let fileSize = handle.seekToEndOfFile()
+        let offset = fileSize > UInt64(maxBytes) ? fileSize - UInt64(maxBytes) : 0
+        handle.seek(toFileOffset: offset)
+
+        guard let tail = String(data: handle.readDataToEndOfFile(), encoding: .utf8) else {
+            return nil
+        }
+
+        return tail
+    }
+
     /// Strip <system_instruction> blocks from Codex title/first_user_message
     private func extractUserPrompt(from content: String) -> String {
         var text = content
@@ -286,25 +419,20 @@ final class CodexTaskSource: TaskSource, @unchecked Sendable {
     }
 
     private func findRunningCodexWorkspaces() -> Set<String> {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/bin/ps")
-        process.arguments = ["-axo", "pid=,command="]
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = FileHandle.nullDevice
-
-        do {
-            try process.run()
-            process.waitUntilExit()
-        } catch {
+        guard let output = ProcessProbe.run(
+            path: "/bin/ps",
+            arguments: ["-axo", "pid=,command="],
+            logger: Self.log,
+            label: "ps"
+        ) else {
             return []
         }
 
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        guard let output = String(data: data, encoding: .utf8) else { return [] }
-
         var workspaces: Set<String> = []
-        for line in output.components(separatedBy: "\n") {
+        let lines = output.components(separatedBy: "\n")
+        let codexLines = lines.filter { $0.localizedCaseInsensitiveContains("codex") }
+
+        for line in lines {
             guard line.localizedCaseInsensitiveContains("codex") else { continue }
             guard !line.contains(".cursor/extensions/") else { continue }
             guard !line.contains("Cursor.app") else { continue }
@@ -318,6 +446,14 @@ final class CodexTaskSource: TaskSource, @unchecked Sendable {
                 workspaces.insert(workspace)
             }
         }
+
+        if workspaces.isEmpty && !codexLines.isEmpty {
+            let sample = codexLines.prefix(5).joined(separator: " || ")
+            Self.log.warning(
+                "Codex-related processes found but no CLI workspaces were extracted sample=\(sample, privacy: .public)"
+            )
+        }
+
         return workspaces
     }
 
@@ -331,26 +467,19 @@ final class CodexTaskSource: TaskSource, @unchecked Sendable {
     }
 
     private func extractCWD(pid: Int) -> String? {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/sbin/lsof")
-        process.arguments = ["-a", "-p", "\(pid)", "-Fn", "-d", "cwd"]
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = FileHandle.nullDevice
-
-        do {
-            try process.run()
-            process.waitUntilExit()
-        } catch {
+        guard let output = ProcessProbe.run(
+            path: "/usr/sbin/lsof",
+            arguments: ["-a", "-p", "\(pid)", "-Fn", "-d", "cwd"],
+            logger: Self.log,
+            label: "lsof"
+        ) else {
             return nil
         }
-
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        guard let output = String(data: data, encoding: .utf8) else { return nil }
 
         for line in output.components(separatedBy: "\n") where line.hasPrefix("n") {
             return String(line.dropFirst())
         }
+        Self.log.debug("No Codex CLI CWD found for pid=\(pid)")
         return nil
     }
 
@@ -359,7 +488,12 @@ final class CodexTaskSource: TaskSource, @unchecked Sendable {
         let isRunning = NSWorkspace.shared.runningApplications.contains {
             $0.bundleIdentifier == bundleIdentifier
         }
-        guard isRunning else { return [] }
+        guard isRunning else {
+            Self.log.debug("Codex fallback returned no snapshots because desktop app is not running")
+            return []
+        }
+
+        Self.log.debug("Using Codex app presence fallback")
 
         return [
             ExternalTaskSnapshot(
@@ -382,4 +516,32 @@ final class CodexTaskSource: TaskSource, @unchecked Sendable {
         guard let cStr = sqlite3_column_text(stmt, index) else { return nil }
         return String(cString: cStr)
     }
+
+    private func codexDatabaseCandidates() -> [String] {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        return [
+            "\(home)/.codex/state_5.sqlite",
+            "\(home)/.codex/sqlite/codex-dev.db",
+        ]
+    }
+}
+
+private struct CodexRolloutEvent: Decodable {
+    let type: String
+    let payload: Payload
+
+    struct Payload: Decodable {
+        let type: String
+        let turnId: String?
+
+        private enum CodingKeys: String, CodingKey {
+            case type
+            case turnId = "turn_id"
+        }
+    }
+}
+
+struct CodexCLIRolloutState {
+    let status: TaskStatus
+    let turnId: String?
 }
