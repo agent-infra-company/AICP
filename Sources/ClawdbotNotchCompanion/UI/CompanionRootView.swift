@@ -898,6 +898,7 @@ private struct UnifiedTaskRow: View {
         case .codex: return .teal
         case .claudeDesktop: return .orange
         case .cursor: return .indigo
+        case .webAIChat: return .cyan
         }
     }
 

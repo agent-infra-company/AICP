@@ -8,6 +8,7 @@ enum TaskSourceKind: String, Codable, CaseIterable, Identifiable, Hashable {
     case codex = "codex"
     case claudeDesktop = "claude_desktop"
     case cursor = "cursor"
+    case webAIChat = "web_ai_chat"
 
     var id: String { rawValue }
 
@@ -19,6 +20,7 @@ enum TaskSourceKind: String, Codable, CaseIterable, Identifiable, Hashable {
         case .codex: "Codex"
         case .claudeDesktop: "Claude Desktop"
         case .cursor: "Cursor"
+        case .webAIChat: "Web AI"
         }
     }
 
@@ -30,6 +32,7 @@ enum TaskSourceKind: String, Codable, CaseIterable, Identifiable, Hashable {
         case .codex: "doc.text.magnifyingglass"
         case .claudeDesktop: "bubble.left.and.bubble.right"
         case .cursor: "chevron.left.forwardslash.chevron.right"
+        case .webAIChat: "globe"
         }
     }
 
@@ -41,6 +44,7 @@ enum TaskSourceKind: String, Codable, CaseIterable, Identifiable, Hashable {
         case .codex: "teal"
         case .claudeDesktop: "orange"
         case .cursor: "indigo"
+        case .webAIChat: "cyan"
         }
     }
 
@@ -52,6 +56,7 @@ enum TaskSourceKind: String, Codable, CaseIterable, Identifiable, Hashable {
         case .codex: "codex"
         case .claudeDesktop: "claude"
         case .cursor: nil
+        case .webAIChat: nil
         }
     }
 
@@ -69,6 +74,14 @@ enum TaskSourceKind: String, Codable, CaseIterable, Identifiable, Hashable {
             ["com.anthropic.claudefordesktop"]
         case .cursor:
             ["com.todesktop.230313mzl4w4u92"]
+        case .webAIChat:
+            [
+                "com.google.Chrome",
+                "com.apple.Safari",
+                "company.thebrowser.Browser",
+                "com.brave.Browser",
+                "com.microsoft.edgemac",
+            ]
         }
     }
 
@@ -86,6 +99,14 @@ enum TaskSourceKind: String, Codable, CaseIterable, Identifiable, Hashable {
             ["/Applications/Claude.app"]
         case .cursor:
             ["/Applications/Cursor.app"]
+        case .webAIChat:
+            [
+                "/Applications/Google Chrome.app",
+                "/Applications/Safari.app",
+                "/Applications/Arc.app",
+                "/Applications/Brave Browser.app",
+                "/Applications/Microsoft Edge.app",
+            ]
         }
     }
 }

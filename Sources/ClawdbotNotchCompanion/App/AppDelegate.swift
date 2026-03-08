@@ -81,6 +81,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         await aggregator.register(CodexTaskSource())
         await aggregator.register(ClaudeDesktopTaskSource())
         await aggregator.register(CursorTaskSource())
+        await aggregator.register(WebAIChatTaskSource())
     }
 
     private func showNotchShell() {

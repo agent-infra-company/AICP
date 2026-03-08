@@ -74,12 +74,18 @@ struct DisplayTask: Identifiable, Hashable {
         if sourceKind == .codex, metadata["source"] == "cli" {
             return TaskSourceKind.claudeCode.activationBundleIdentifiers
         }
+        if sourceKind == .webAIChat, let browser = metadata["browser"] {
+            return [browser]
+        }
         return sourceKind.activationBundleIdentifiers
     }
 
     var activationApplicationPaths: [String] {
         if sourceKind == .codex, metadata["source"] == "cli" {
             return TaskSourceKind.claudeCode.activationApplicationPaths
+        }
+        if sourceKind == .webAIChat, let browserName = metadata["browserName"] {
+            return ["/Applications/\(browserName).app"]
         }
         return sourceKind.activationApplicationPaths
     }
