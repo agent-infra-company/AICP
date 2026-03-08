@@ -7,6 +7,7 @@ enum TaskSourceKind: String, Codable, CaseIterable, Identifiable, Hashable {
     case claudeCode = "claude_code"
     case codex = "codex"
     case claudeDesktop = "claude_desktop"
+    case cursor = "cursor"
 
     var id: String { rawValue }
 
@@ -17,6 +18,7 @@ enum TaskSourceKind: String, Codable, CaseIterable, Identifiable, Hashable {
         case .claudeCode: "Claude Code"
         case .codex: "Codex"
         case .claudeDesktop: "Claude Desktop"
+        case .cursor: "Cursor"
         }
     }
 
@@ -27,6 +29,7 @@ enum TaskSourceKind: String, Codable, CaseIterable, Identifiable, Hashable {
         case .claudeCode: "terminal"
         case .codex: "doc.text.magnifyingglass"
         case .claudeDesktop: "bubble.left.and.bubble.right"
+        case .cursor: "chevron.left.forwardslash.chevron.right"
         }
     }
 
@@ -37,6 +40,7 @@ enum TaskSourceKind: String, Codable, CaseIterable, Identifiable, Hashable {
         case .claudeCode: "green"
         case .codex: "teal"
         case .claudeDesktop: "orange"
+        case .cursor: "indigo"
         }
     }
 
@@ -47,6 +51,7 @@ enum TaskSourceKind: String, Codable, CaseIterable, Identifiable, Hashable {
         case .claudeCode: nil
         case .codex: "codex"
         case .claudeDesktop: "claude"
+        case .cursor: nil
         }
     }
 
@@ -62,6 +67,8 @@ enum TaskSourceKind: String, Codable, CaseIterable, Identifiable, Hashable {
             ["com.openai.codex"]
         case .claudeDesktop:
             ["com.anthropic.claudefordesktop"]
+        case .cursor:
+            ["com.todesktop.230313mzl4w4u92"]
         }
     }
 
@@ -77,6 +84,8 @@ enum TaskSourceKind: String, Codable, CaseIterable, Identifiable, Hashable {
             ["/Applications/Codex.app"]
         case .claudeDesktop:
             ["/Applications/Claude.app"]
+        case .cursor:
+            ["/Applications/Cursor.app"]
         }
     }
 }

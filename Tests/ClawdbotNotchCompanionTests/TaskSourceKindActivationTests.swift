@@ -17,6 +17,11 @@ final class TaskSourceKindActivationTests: XCTestCase {
         XCTAssertEqual(TaskSourceKind.claudeDesktop.activationApplicationPaths, ["/Applications/Claude.app"])
     }
 
+    func testCursorActivationTargetsMatchInstalledApp() {
+        XCTAssertEqual(TaskSourceKind.cursor.activationBundleIdentifiers, ["com.todesktop.230313mzl4w4u92"])
+        XCTAssertEqual(TaskSourceKind.cursor.activationApplicationPaths, ["/Applications/Cursor.app"])
+    }
+
     func testClaudeCodeActivationTargetsSupportTerminalFallbacks() {
         XCTAssertEqual(
             TaskSourceKind.claudeCode.activationBundleIdentifiers,

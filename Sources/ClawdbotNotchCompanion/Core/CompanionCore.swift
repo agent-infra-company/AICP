@@ -780,26 +780,58 @@ final class CompanionCore: ObservableObject {
 
     private func processExternalSnapshots(_ new: [TaskSourceKind: [ExternalTaskSnapshot]]) {
         let oldFlat = externalSnapshots.values.flatMap { $0 }
+        let newFlat = new.values.flatMap { $0 }
 
-        for (_, snapshots) in new {
-            for snapshot in snapshots {
-                if let old = oldFlat.first(where: { $0.id == snapshot.id && $0.sourceKind == snapshot.sourceKind }) {
-                    guard old.status != snapshot.status else { continue }
-                    switch snapshot.status {
-                    case .needsInput:
-                        Task { await notificationService.sendExternalTaskNeedsInput(snapshot) }
-                    case .completed:
-                        Task { await notificationService.sendExternalTaskCompleted(snapshot) }
-                    case .failed, .needsAttention:
-                        Task { await notificationService.sendExternalTaskFailed(snapshot) }
-                    default:
-                        break
-                    }
-                    if !isExpanded {
-                        showToast(for: snapshot)
-                    }
-                }
+        for snapshot in newFlat {
+            let old = oldFlat.first(where: { $0.id == snapshot.id && $0.sourceKind == snapshot.sourceKind })
+
+            if let old {
+                let statusChanged = old.status != snapshot.status
+                // Detect completed turns: status stayed .needsInput but updatedAt moved forward,
+                // meaning a full turn (user → assistant) happened between polls.
+                let turnCompleted = snapshot.status == .needsInput
+                    && old.status == .needsInput
+                    && snapshot.updatedAt.timeIntervalSince(old.updatedAt) > 1
+                guard statusChanged || turnCompleted else { continue }
             }
+            // New tasks (old == nil) always get a notification
+
+            switch snapshot.status {
+            case .running, .queued:
+                Task { await notificationService.sendExternalTaskStarted(snapshot) }
+            case .needsInput:
+                Task { await notificationService.sendExternalTaskNeedsInput(snapshot) }
+            case .completed:
+                Task { await notificationService.sendExternalTaskCompleted(snapshot) }
+            case .failed, .needsAttention:
+                Task { await notificationService.sendExternalTaskFailed(snapshot) }
+            default:
+                break
+            }
+            showToast(for: snapshot)
+        }
+
+        // Detect disappeared tasks — previously running tasks that are no longer present
+        for old in oldFlat {
+            guard old.status == .running else { continue }
+            let stillPresent = newFlat.contains { $0.id == old.id && $0.sourceKind == old.sourceKind }
+            guard !stillPresent else { continue }
+
+            let completed = ExternalTaskSnapshot(
+                id: old.id,
+                sourceKind: old.sourceKind,
+                title: old.title,
+                workspace: old.workspace,
+                status: .completed,
+                progress: nil,
+                needsInputPrompt: nil,
+                lastError: nil,
+                updatedAt: Date(),
+                deepLinkURL: old.deepLinkURL,
+                metadata: old.metadata
+            )
+            Task { await notificationService.sendExternalTaskCompleted(completed) }
+            showToast(for: completed)
         }
 
         externalSnapshots = new

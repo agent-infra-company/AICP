@@ -7,6 +7,7 @@ protocol NotificationService: AnyObject, Sendable {
     func sendTaskNeedsInput(_ task: TaskRecord) async
     func sendTaskCompleted(_ task: TaskRecord) async
     func sendTaskFailed(_ task: TaskRecord) async
+    func sendExternalTaskStarted(_ snapshot: ExternalTaskSnapshot) async
     func sendExternalTaskNeedsInput(_ snapshot: ExternalTaskSnapshot) async
     func sendExternalTaskCompleted(_ snapshot: ExternalTaskSnapshot) async
     func sendExternalTaskFailed(_ snapshot: ExternalTaskSnapshot) async
@@ -61,6 +62,14 @@ final class UserNotificationService: NotificationService, @unchecked Sendable {
             title: "Task needs attention",
             body: task.lastError ?? task.title,
             task: task
+        )
+    }
+
+    func sendExternalTaskStarted(_ snapshot: ExternalTaskSnapshot) async {
+        await sendExternal(
+            title: "\(snapshot.sourceKind.displayName): Task started",
+            body: snapshot.title,
+            snapshot: snapshot
         )
     }
 

@@ -7,6 +7,7 @@ import UserNotifications
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
     let core: CompanionCore
+    private let aggregator: TaskSourceAggregator
     private let environment = AppRuntimeEnvironment.current
 
     private var shellController: NotchShellController?
@@ -25,6 +26,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         let retentionManager = RetentionScheduler()
 
         let aggregator = TaskSourceAggregator()
+        self.aggregator = aggregator
 
         self.core = CompanionCore(
             gatewayClient: gatewayClient,
@@ -38,19 +40,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         )
 
         super.init()
-
-        Task {
-            await aggregator.register(ConductorTaskSource())
-            await aggregator.register(ClaudeCodeTaskSource())
-            await aggregator.register(CodexTaskSource())
-            await aggregator.register(ClaudeDesktopTaskSource())
-        }
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // `swift run` launches an unbundled process.
         guard environment.supportsOnboarding else {
             Task { @MainActor in
+                await registerTaskSources()
                 await core.bootstrap()
                 // Full onboarding is unstable in unbundled runs; open notch shell directly.
                 showNotchShell()
@@ -63,6 +59,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         }
 
         Task { @MainActor in
+            await registerTaskSources()
             await core.bootstrap()
 
             if !core.settings.hasCompletedOnboarding {
@@ -76,6 +73,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                 showNotchShell()
             }
         }
+    }
+
+    private func registerTaskSources() async {
+        await aggregator.register(ConductorTaskSource())
+        await aggregator.register(ClaudeCodeTaskSource())
+        await aggregator.register(CodexTaskSource())
+        await aggregator.register(ClaudeDesktopTaskSource())
+        await aggregator.register(CursorTaskSource())
     }
 
     private func showNotchShell() {

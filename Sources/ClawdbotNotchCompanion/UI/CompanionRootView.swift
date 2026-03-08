@@ -196,27 +196,37 @@ private struct NotchGradientCollapsedView: View {
 
             // Toast content overlay
             if let toast = core.activeToast {
-                HStack(spacing: 8) {
-                    RiveAvatarView()
-                        .frame(width: 24, height: 24)
-                        .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+                HStack(spacing: 0) {
+                    // Left wing: avatar + scrolling marquee
+                    HStack(spacing: 8) {
+                        RiveAvatarView()
+                            .frame(width: 24, height: 24)
+                            .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
 
-                    MarqueeText(
-                        text: toast.title,
-                        font: .system(size: 13, weight: .medium),
-                        color: .white.opacity(0.9),
-                        speed: 30,
-                        minimumCharacterCount: toastMarqueeCharacterThreshold
-                    )
+                        MarqueeText(
+                            text: toast.title,
+                            font: .system(size: 13, weight: .medium),
+                            color: .white.opacity(0.9),
+                            speed: 30,
+                            minimumCharacterCount: toastMarqueeCharacterThreshold
+                        )
+                    }
+                    .padding(.leading, 14)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .layoutPriority(1)
+                    .clipped()
 
+                    // Gap matching the hardware notch
+                    Color.clear
+                        .frame(width: info.notchWidth)
+
+                    // Right wing: status label
                     Text(toastStatusLabel(toast.status))
                         .font(.system(size: 13, weight: .regular))
                         .foregroundStyle(.white.opacity(0.5))
                         .fixedSize()
+                        .padding(.trailing, 14)
+                        .frame(maxWidth: .infinity, alignment: .trailing)
                 }
-                .padding(.horizontal, 14)
                 .opacity(toastExpanded ? 1 : 0)
                 .frame(width: effectiveNotchWidth, height: info.notchHeight)
                 .background(Color.black)
@@ -887,6 +897,7 @@ private struct UnifiedTaskRow: View {
         case .claudeCode: return .green
         case .codex: return .teal
         case .claudeDesktop: return .orange
+        case .cursor: return .indigo
         }
     }
 
