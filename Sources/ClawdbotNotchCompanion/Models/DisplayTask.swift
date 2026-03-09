@@ -13,6 +13,32 @@ struct DisplayTask: Identifiable, Hashable {
     let deepLinkURL: URL?
     let metadata: [String: String]
 
+    init(
+        id: String,
+        sourceKind: TaskSourceKind,
+        title: String,
+        workspace: String?,
+        status: TaskStatus,
+        progress: String?,
+        needsInputPrompt: String?,
+        lastError: String?,
+        updatedAt: Date,
+        deepLinkURL: URL?,
+        metadata: [String: String]
+    ) {
+        self.id = id
+        self.sourceKind = sourceKind
+        self.title = title
+        self.workspace = workspace
+        self.status = status
+        self.progress = progress
+        self.needsInputPrompt = needsInputPrompt
+        self.lastError = lastError
+        self.updatedAt = updatedAt
+        self.deepLinkURL = deepLinkURL
+        self.metadata = metadata
+    }
+
     init(from record: TaskRecord, profiles: [ProfileConfig]) {
         self.id = "openclaw-\(record.taskId)"
         self.sourceKind = .openClaw

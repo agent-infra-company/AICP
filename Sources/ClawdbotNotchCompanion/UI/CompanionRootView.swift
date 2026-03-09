@@ -263,6 +263,15 @@ private struct NotchGradientCollapsedView: View {
     }
 }
 
+private func cliPickerLabel(_ cli: TaskSourceKind) -> String {
+    switch cli {
+    case .claudeCode: return "Claude"
+    case .codex: return "Codex"
+    case .openClaw: return "OpenClaw"
+    default: return cli.displayName
+    }
+}
+
 private func toastStatusLabel(_ status: TaskStatus) -> String {
     switch status {
     case .completed: return "Done"
@@ -464,12 +473,42 @@ private struct ExpandedCompanionView: View {
                         .padding(.top, notchTop)
                     } else {
                         VStack(alignment: .leading, spacing: 0) {
-                            // ChatGPT-style input
+                            // ChatGPT-style input with inline CLI picker
                             HStack(spacing: 8) {
                                 TextField("Message Clawdbot...", text: $core.composePrompt)
                                     .textFieldStyle(.plain)
                                     .font(.system(size: 13))
                                     .foregroundStyle(.white)
+                                    .onSubmit {
+                                        Task { await core.submitPrompt() }
+                                    }
+
+                                if core.availableCLIs.count > 1 {
+                                    Menu {
+                                        ForEach(core.availableCLIs, id: \.rawValue) { cli in
+                                            Button {
+                                                core.selectCLI(cli)
+                                            } label: {
+                                                HStack {
+                                                    Text(cli.displayName)
+                                                    if cli == core.selectedCLI {
+                                                        Image(systemName: "checkmark")
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    } label: {
+                                        Text(cliPickerLabel(core.selectedCLI))
+                                            .font(.system(size: 10, weight: .medium))
+                                            .foregroundStyle(.white.opacity(0.5))
+                                            .padding(.horizontal, 6)
+                                            .padding(.vertical, 3)
+                                            .background(Color.white.opacity(0.08))
+                                            .clipShape(Capsule())
+                                    }
+                                    .menuStyle(.borderlessButton)
+                                    .fixedSize()
+                                }
 
                                 if !core.composePrompt.trimmingCharacters(in: .whitespaces).isEmpty {
                                     Button {

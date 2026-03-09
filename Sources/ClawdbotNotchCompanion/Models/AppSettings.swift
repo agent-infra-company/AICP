@@ -19,6 +19,7 @@ struct AppSettings: Codable, Hashable {
     var hasCompletedOnboarding: Bool
     var glowColorHex: String
     var notchStyle: NotchStyle
+    var selectedCLI: String?
 
     static var `default`: AppSettings {
         AppSettings(
@@ -32,7 +33,8 @@ struct AppSettings: Codable, Hashable {
             selectedRouteByProfile: [:],
             hasCompletedOnboarding: false,
             glowColorHex: "#FF0000",
-            notchStyle: .glow
+            notchStyle: .glow,
+            selectedCLI: nil
         )
     }
 
@@ -47,7 +49,8 @@ struct AppSettings: Codable, Hashable {
         selectedRouteByProfile: [UUID: String],
         hasCompletedOnboarding: Bool = false,
         glowColorHex: String = "#FF0000",
-        notchStyle: NotchStyle = .glow
+        notchStyle: NotchStyle = .glow,
+        selectedCLI: String? = nil
     ) {
         self.launchAtLogin = launchAtLogin
         self.showInFullscreen = showInFullscreen
@@ -60,6 +63,7 @@ struct AppSettings: Codable, Hashable {
         self.hasCompletedOnboarding = hasCompletedOnboarding
         self.glowColorHex = glowColorHex
         self.notchStyle = notchStyle
+        self.selectedCLI = selectedCLI
     }
 
     init(from decoder: Decoder) throws {
@@ -75,6 +79,7 @@ struct AppSettings: Codable, Hashable {
         hasCompletedOnboarding = try container.decodeIfPresent(Bool.self, forKey: .hasCompletedOnboarding) ?? false
         glowColorHex = try container.decodeIfPresent(String.self, forKey: .glowColorHex) ?? "#FF0000"
         notchStyle = try container.decodeIfPresent(NotchStyle.self, forKey: .notchStyle) ?? .glow
+        selectedCLI = try container.decodeIfPresent(String.self, forKey: .selectedCLI)
     }
 }
 

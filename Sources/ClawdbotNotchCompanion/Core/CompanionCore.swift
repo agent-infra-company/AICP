@@ -102,6 +102,9 @@ final class CompanionCore: ObservableObject {
     @Published var externalSnapshots: [TaskSourceKind: [ExternalTaskSnapshot]] = [:]
     @Published var activeToast: NotchToast?
 
+    @Published var selectedCLI: TaskSourceKind = .claudeCode
+    @Published var availableCLIs: [TaskSourceKind] = []
+
     private let stateMachine = TaskStateMachine()
     private let gatewayClient: GatewayClient
     private let runtimeManager: RuntimeManager
@@ -111,6 +114,7 @@ final class CompanionCore: ObservableObject {
     private let loginItemManager: LoginItemManaging
     private let retentionManager: RetentionManaging
     private let taskSourceAggregator: TaskSourceAggregator
+    private let cliSessionLauncher: CLISessionLauncher
 
     private var eventTasks: [UUID: Task<Void, Never>] = [:]
     private var aggregatorTask: Task<Void, Never>?
@@ -124,7 +128,8 @@ final class CompanionCore: ObservableObject {
         telemetryManager: TelemetryManaging,
         loginItemManager: LoginItemManaging,
         retentionManager: RetentionManaging,
-        taskSourceAggregator: TaskSourceAggregator
+        taskSourceAggregator: TaskSourceAggregator,
+        cliSessionLauncher: CLISessionLauncher = CLISessionLauncher()
     ) {
         self.gatewayClient = gatewayClient
         self.runtimeManager = runtimeManager
@@ -134,6 +139,7 @@ final class CompanionCore: ObservableObject {
         self.loginItemManager = loginItemManager
         self.retentionManager = retentionManager
         self.taskSourceAggregator = taskSourceAggregator
+        self.cliSessionLauncher = cliSessionLauncher
     }
 
     deinit {
@@ -170,6 +176,8 @@ final class CompanionCore: ObservableObject {
         if let profile = selectedProfile {
             await refreshRoutes(profile)
         }
+
+        await detectAvailableCLIs()
 
         await startExternalTaskMonitoring()
     }
@@ -384,6 +392,17 @@ final class CompanionCore: ObservableObject {
             return
         }
 
+        switch selectedCLI {
+        case .claudeCode, .codex:
+            await submitCLISession(prompt: prompt, cli: selectedCLI)
+        case .openClaw:
+            await submitOpenClawTask(prompt: prompt)
+        default:
+            lastErrorBanner = "\(selectedCLI.displayName) is not supported for new sessions."
+        }
+    }
+
+    private func submitOpenClawTask(prompt: String) async {
         guard let profile = selectedProfile else {
             lastErrorBanner = "Select a profile before sending a task."
             return
@@ -423,6 +442,70 @@ final class CompanionCore: ObservableObject {
         } catch {
             await handleTaskFailure(taskId: task.taskId, reason: error.localizedDescription)
         }
+    }
+
+    private func submitCLISession(prompt: String, cli: TaskSourceKind) async {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        await launchCLISession(prompt: prompt, cli: cli, cwd: home)
+    }
+
+    private func launchCLISession(prompt: String, cli: TaskSourceKind, cwd: String) async {
+        guard FileManager.default.fileExists(atPath: cwd) else {
+            lastErrorBanner = "Directory not found: \(cwd)"
+            return
+        }
+
+        isSubmitting = true
+
+        do {
+            try await cliSessionLauncher.launch(cli: cli, prompt: prompt, cwd: cwd)
+            composePrompt = ""
+            isSubmitting = false
+
+            // Collapse the notch so the terminal is visible
+            setExpanded(false)
+
+            // The existing task source polling (ClaudeCodeTaskSource / CodexTaskSource)
+            // will detect the new session within a few seconds and show it in the task list.
+        } catch {
+            isSubmitting = false
+            lastErrorBanner = error.localizedDescription
+        }
+    }
+
+    func selectCLI(_ cli: TaskSourceKind) {
+        selectedCLI = cli
+        settings.selectedCLI = cli.rawValue
+        persistAsync()
+    }
+
+    private func detectAvailableCLIs() async {
+        var available: [TaskSourceKind] = []
+
+        if await cliSessionLauncher.isAvailable(.claudeCode) {
+            available.append(.claudeCode)
+        }
+        if await cliSessionLauncher.isAvailable(.codex) {
+            available.append(.codex)
+        }
+        if !profiles.isEmpty {
+            available.append(.openClaw)
+        }
+
+        availableCLIs = available
+
+        // Restore persisted selection or default to first available
+        if let savedCLI = settings.selectedCLI,
+           let kind = TaskSourceKind(rawValue: savedCLI),
+           available.contains(kind) {
+            selectedCLI = kind
+        } else if let first = available.first {
+            selectedCLI = first
+        }
+
+        Self.log.info(
+            "Detected available CLIs: \(CompanionDiagnostics.joined(available.map(\.displayName)), privacy: .public) selected=\(self.selectedCLI.displayName, privacy: .public)"
+        )
     }
 
     func answerFollowUp(taskId: String, answer: String) async {
