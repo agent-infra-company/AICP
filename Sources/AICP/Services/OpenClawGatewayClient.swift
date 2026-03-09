@@ -24,9 +24,17 @@ actor OpenClawGatewayClient: GatewayClient {
     private let secretStore: SecretStoring
     private var connections: [UUID: ConnectionBox] = [:]
 
-    init(secretStore: SecretStoring, session: URLSession = .shared) {
+    init(secretStore: SecretStoring, session: URLSession? = nil) {
         self.secretStore = secretStore
-        self.session = session
+        if let session {
+            self.session = session
+        } else {
+            let config = URLSessionConfiguration.default
+            config.timeoutIntervalForRequest = 30
+            config.timeoutIntervalForResource = 120
+            config.waitsForConnectivity = true
+            self.session = URLSession(configuration: config)
+        }
     }
 
     func connect(profile: ProfileConfig) async throws {

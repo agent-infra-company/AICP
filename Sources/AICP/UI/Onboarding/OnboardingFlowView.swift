@@ -6,7 +6,8 @@ struct OnboardingFlowView: View {
 
     @State private var currentStep = 0
 
-    private let totalSteps = 4
+    private static let steps = [0, 1, 2, 3]
+    private var totalSteps: Int { Self.steps.count }
 
     var body: some View {
         ZStack {

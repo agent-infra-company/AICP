@@ -22,6 +22,7 @@ enum SettingsCategory: String, CaseIterable, Identifiable {
 
 struct SettingsRootView: View {
     @ObservedObject var core: CompanionCore
+    @StateObject private var updateManager = UpdateManager()
 
     @State private var selectedCategory: SettingsCategory = .general
 
@@ -75,7 +76,7 @@ struct SettingsRootView: View {
         case .commandTemplates:
             CommandTemplatesSettingsView(core: core)
         case .about:
-            AboutSettingsView()
+            AboutSettingsView(updateManager: updateManager)
         }
     }
 }

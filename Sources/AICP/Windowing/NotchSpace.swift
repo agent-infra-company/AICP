@@ -12,6 +12,9 @@ final class NotchSpace {
     private let connection: Int32
     private let space: Int32
 
+    /// Whether private CGS APIs were resolved successfully.
+    let isAvailable: Bool
+
     private init() {
         let handle = dlopen(nil, RTLD_NOW)
 
@@ -20,48 +23,45 @@ final class NotchSpace {
         typealias F_CGSSpaceSetAbsoluteLevel = @convention(c) (Int32, Int32, Int32) -> Int32
         typealias F_CGSShowSpaces = @convention(c) (Int32, CFArray) -> Int32
 
-        let _CGSDefaultConnection = unsafeBitCast(
-            dlsym(handle, "_CGSDefaultConnection"),
-            to: F_CGSDefaultConnection.self
-        )
-        let CGSSpaceCreate = unsafeBitCast(
-            dlsym(handle, "CGSSpaceCreate"),
-            to: F_CGSSpaceCreate.self
-        )
-        let CGSSpaceSetAbsoluteLevel = unsafeBitCast(
-            dlsym(handle, "CGSSpaceSetAbsoluteLevel"),
-            to: F_CGSSpaceSetAbsoluteLevel.self
-        )
-        let CGSShowSpaces = unsafeBitCast(
-            dlsym(handle, "CGSShowSpaces"),
-            to: F_CGSShowSpaces.self
-        )
+        guard let pConn = dlsym(handle, "_CGSDefaultConnection"),
+              let pCreate = dlsym(handle, "CGSSpaceCreate"),
+              let pLevel = dlsym(handle, "CGSSpaceSetAbsoluteLevel"),
+              let pShow = dlsym(handle, "CGSShowSpaces") else {
+            connection = 0
+            space = 0
+            isAvailable = false
+            return
+        }
+
+        let _CGSDefaultConnection = unsafeBitCast(pConn, to: F_CGSDefaultConnection.self)
+        let CGSSpaceCreate = unsafeBitCast(pCreate, to: F_CGSSpaceCreate.self)
+        let CGSSpaceSetAbsoluteLevel = unsafeBitCast(pLevel, to: F_CGSSpaceSetAbsoluteLevel.self)
+        let CGSShowSpaces = unsafeBitCast(pShow, to: F_CGSShowSpaces.self)
 
         connection = _CGSDefaultConnection()
         space = CGSSpaceCreate(connection, 0x1, nil)
         _ = CGSSpaceSetAbsoluteLevel(connection, space, Int32.max)
         _ = CGSShowSpaces(connection, [space] as CFArray)
+        isAvailable = true
     }
 
     func addWindow(_ window: NSWindow) {
+        guard isAvailable else { return }
         let handle = dlopen(nil, RTLD_NOW)
 
         typealias F_CGSAddWindowsToSpaces = @convention(c) (Int32, CFArray, CFArray) -> Void
-        let CGSAddWindowsToSpaces = unsafeBitCast(
-            dlsym(handle, "CGSAddWindowsToSpaces"),
-            to: F_CGSAddWindowsToSpaces.self
-        )
+        guard let ptr = dlsym(handle, "CGSAddWindowsToSpaces") else { return }
+        let CGSAddWindowsToSpaces = unsafeBitCast(ptr, to: F_CGSAddWindowsToSpaces.self)
         CGSAddWindowsToSpaces(connection, [window.windowNumber] as CFArray, [space] as CFArray)
     }
 
     func removeWindow(_ window: NSWindow) {
+        guard isAvailable else { return }
         let handle = dlopen(nil, RTLD_NOW)
 
         typealias F_CGSRemoveWindowsFromSpaces = @convention(c) (Int32, CFArray, CFArray) -> Void
-        let CGSRemoveWindowsFromSpaces = unsafeBitCast(
-            dlsym(handle, "CGSRemoveWindowsFromSpaces"),
-            to: F_CGSRemoveWindowsFromSpaces.self
-        )
+        guard let ptr = dlsym(handle, "CGSRemoveWindowsFromSpaces") else { return }
+        let CGSRemoveWindowsFromSpaces = unsafeBitCast(ptr, to: F_CGSRemoveWindowsFromSpaces.self)
         CGSRemoveWindowsFromSpaces(connection, [window.windowNumber] as CFArray, [space] as CFArray)
     }
 }

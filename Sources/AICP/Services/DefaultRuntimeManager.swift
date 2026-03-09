@@ -60,8 +60,8 @@ actor DefaultRuntimeManager: RuntimeManager {
             guard let sshRef = profile.sshRef, !sshRef.isEmpty else {
                 throw RuntimeManagerError.missingSSHReference
             }
-            guard !sshRef.contains("\n"), !sshRef.contains("\r") else {
-                throw RuntimeManagerError.commandRejected("SSH reference contains invalid control characters.")
+            guard Self.isValidSSHReference(sshRef) else {
+                throw RuntimeManagerError.commandRejected("SSH reference contains invalid characters. Expected format: user@host or host.")
             }
             command = "ssh \(sshRef) '\(escapeForSingleQuotes(command))'"
         }
@@ -97,5 +97,12 @@ actor DefaultRuntimeManager: RuntimeManager {
 
     private func escapeForSingleQuotes(_ raw: String) -> String {
         raw.replacingOccurrences(of: "'", with: "'\\''")
+    }
+
+    /// Validates that an SSH reference matches a safe pattern (e.g. user@host, host, user@host:port).
+    private static let sshRefPattern = #"^[a-zA-Z0-9._\-]+(@[a-zA-Z0-9._\-]+(:[0-9]{1,5})?)?$"#
+
+    private static func isValidSSHReference(_ ref: String) -> Bool {
+        ref.range(of: sshRefPattern, options: .regularExpression) != nil
     }
 }

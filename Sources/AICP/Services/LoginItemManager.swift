@@ -1,11 +1,14 @@
 import Foundation
 import ServiceManagement
+import os.log
 
 protocol LoginItemManaging: AnyObject {
     func setEnabled(_ enabled: Bool) throws
 }
 
 final class LoginItemManager: LoginItemManaging {
+    private static let log = CompanionDiagnostics.logger(category: "LoginItemManager")
+
     func setEnabled(_ enabled: Bool) throws {
         guard #available(macOS 13.0, *) else {
             return
@@ -18,13 +21,13 @@ final class LoginItemManager: LoginItemManaging {
             do {
                 try SMAppService.mainApp.register()
             } catch {
-                // Ignore already-registered transient errors.
+                Self.log.warning("Login item registration failed: \(error.localizedDescription, privacy: .public)")
             }
         } else {
             do {
                 try SMAppService.mainApp.unregister()
             } catch {
-                // Ignore if not currently registered.
+                Self.log.warning("Login item unregistration failed: \(error.localizedDescription, privacy: .public)")
             }
         }
     }

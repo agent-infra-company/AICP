@@ -63,6 +63,9 @@ struct CommandTemplateEditor: View {
     @State var set: CommandTemplateSet
     let onSave: (CommandTemplateSet) -> Void
 
+    @State private var validationError: String?
+    private static let placeholderPattern = #"^[a-zA-Z0-9_]+$"#
+
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             TextField("Template name", text: $set.name)
@@ -74,7 +77,7 @@ struct CommandTemplateEditor: View {
             TextField(
                 "Allowed placeholders (comma separated)",
                 text: Binding(
-                    get: { set.allowedPlaceholders.joined(separator: ",") },
+                    get: { set.allowedPlaceholders.joined(separator: ", ") },
                     set: {
                         set.allowedPlaceholders = $0
                             .split(separator: ",")
@@ -84,9 +87,27 @@ struct CommandTemplateEditor: View {
                 )
             )
 
+            if let validationError {
+                Text(validationError)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.red)
+            }
+
             HStack {
                 Spacer()
                 Button("Save Template") {
+                    guard !set.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                        validationError = "Template name cannot be empty."
+                        return
+                    }
+                    let invalidPlaceholders = set.allowedPlaceholders.filter {
+                        $0.range(of: Self.placeholderPattern, options: .regularExpression) == nil
+                    }
+                    guard invalidPlaceholders.isEmpty else {
+                        validationError = "Invalid placeholder names: \(invalidPlaceholders.joined(separator: ", ")). Only letters, numbers, and underscores allowed."
+                        return
+                    }
+                    validationError = nil
                     onSave(set)
                 }
             }

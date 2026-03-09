@@ -2,6 +2,7 @@ import AppKit
 import SwiftUI
 
 struct AboutSettingsView: View {
+    @ObservedObject var updateManager: UpdateManager
     @State private var isExporting = false
     @State private var exportError: String?
 
@@ -40,8 +41,7 @@ struct AboutSettingsView: View {
 
                     HStack(spacing: 12) {
                         Button {
-                            // TODO: Replace with actual GitHub Issues URL
-                            if let url = URL(string: "https://github.com/your-org/aicp/issues") {
+                            if let url = URL(string: "mailto:humans@conductor.build?subject=AICP%20Bug%20Report") {
                                 NSWorkspace.shared.open(url)
                             }
                         } label: {
@@ -49,7 +49,7 @@ struct AboutSettingsView: View {
                         }
 
                         Button {
-                            if let url = URL(string: "mailto:support@aicp.dev?subject=AICP%20Feedback") {
+                            if let url = URL(string: "mailto:humans@conductor.build?subject=AICP%20Feedback") {
                                 NSWorkspace.shared.open(url)
                             }
                         } label: {
@@ -92,12 +92,12 @@ struct AboutSettingsView: View {
             GroupBox("Updates") {
                 VStack(alignment: .leading, spacing: 12) {
                     Button {
-                        // Placeholder — will be wired to Sparkle
+                        updateManager.checkForUpdates()
                     } label: {
                         Label("Check for Updates\u{2026}", systemImage: "arrow.triangle.2.circlepath")
                     }
-                    .disabled(true)
-                    .help("Auto-updates coming soon")
+                    .disabled(!updateManager.canCheckForUpdates)
+                    .help(updateManager.canCheckForUpdates ? "Check for available updates" : "Update feed not configured. Set SUFeedURL in Info.plist.")
                 }
                 .padding(8)
             }

@@ -18,9 +18,13 @@ final class ConductorTaskSource: TaskSource, @unchecked Sendable {
         if let dbPath {
             self.dbPath = dbPath
         } else {
-            let appSupport = FileManager.default.urls(
+            guard let appSupport = FileManager.default.urls(
                 for: .applicationSupportDirectory, in: .userDomainMask
-            ).first!
+            ).first else {
+                self.dbPath = ""
+                self.pollInterval = pollInterval
+                return
+            }
             self.dbPath = appSupport
                 .appendingPathComponent("com.conductor.app")
                 .appendingPathComponent("conductor.db")

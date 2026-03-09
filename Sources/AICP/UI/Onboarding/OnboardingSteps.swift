@@ -103,6 +103,7 @@ struct OnboardingProfileStep: View {
     @ObservedObject var core: CompanionCore
     @State private var profileName = "Local OpenClaw"
     @State private var gatewayURL = "http://127.0.0.1:4689"
+    @State private var validationError: String?
 
     var body: some View {
         VStack(spacing: 24) {
@@ -134,6 +135,19 @@ struct OnboardingProfileStep: View {
                         .foregroundStyle(.white.opacity(0.5))
                     TextField("Gateway URL", text: $gatewayURL)
                         .textFieldStyle(.roundedBorder)
+                        .onChange(of: gatewayURL) { _, newValue in
+                            if let url = URL(string: newValue), url.scheme != nil, url.host != nil {
+                                validationError = nil
+                            } else if !newValue.isEmpty {
+                                validationError = "Enter a valid URL (e.g. http://127.0.0.1:4689)"
+                            }
+                        }
+                }
+
+                if let validationError {
+                    Text(validationError)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.red)
                 }
             }
             .frame(maxWidth: 400)
@@ -150,15 +164,23 @@ struct OnboardingProfileStep: View {
     }
 
     private func saveProfile() {
-        guard let url = URL(string: gatewayURL) else { return }
+        let trimmedName = profileName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedName.isEmpty else {
+            validationError = "Profile name cannot be empty."
+            return
+        }
+        guard let url = URL(string: gatewayURL), url.scheme != nil, url.host != nil else {
+            validationError = "Enter a valid URL (e.g. http://127.0.0.1:4689)"
+            return
+        }
         if var existing = core.profiles.first {
-            existing.name = profileName
+            existing.name = trimmedName
             existing.gatewayURL = url
             core.upsertProfile(existing)
         } else {
             guard let templateId = core.commandTemplateSets.first?.id else { return }
             let profile = ProfileConfig(
-                id: UUID(), name: profileName, kind: .local,
+                id: UUID(), name: trimmedName, kind: .local,
                 gatewayURL: url, authMode: .none, tokenRef: nil,
                 sshRef: nil, commandTemplateSetId: templateId, enabled: true
             )
