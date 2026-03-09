@@ -25,10 +25,13 @@ final class ShellCommandExecutor: ShellCommandExecuting,  Sendable {
 
                 do {
                     try process.run()
+                    let stdoutDrainer = PipeDrainer(handle: stdoutPipe.fileHandleForReading, label: "aicp.shell.stdout")
+                    let stderrDrainer = PipeDrainer(handle: stderrPipe.fileHandleForReading, label: "aicp.shell.stderr")
+
                     process.waitUntilExit()
 
-                    let stdoutData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
-                    let stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
+                    let stdoutData = stdoutDrainer.waitForData()
+                    let stderrData = stderrDrainer.waitForData()
                     let stdout = String(data: stdoutData, encoding: .utf8) ?? ""
                     let stderr = String(data: stderrData, encoding: .utf8) ?? ""
 
@@ -42,5 +45,23 @@ final class ShellCommandExecutor: ShellCommandExecuting,  Sendable {
                 }
             }
         }
+    }
+}
+
+private final class PipeDrainer: @unchecked Sendable {
+    private let semaphore = DispatchSemaphore(value: 0)
+    private var data = Data()
+
+    init(handle: FileHandle, label: String) {
+        DispatchQueue(label: label).async { [weak self] in
+            guard let self else { return }
+            self.data = handle.readDataToEndOfFile()
+            self.semaphore.signal()
+        }
+    }
+
+    func waitForData() -> Data {
+        semaphore.wait()
+        return data
     }
 }

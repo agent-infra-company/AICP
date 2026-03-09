@@ -76,6 +76,43 @@ final class TaskSourceAggregatorTests: XCTestCase {
         streamTask.cancel()
         await aggregator.stopAll()
     }
+
+    func testFinishedSourceIsRestartedByAvailabilityLoop() async throws {
+        let aggregator = TaskSourceAggregator(availabilityPollInterval: .milliseconds(50))
+        let snapshot = ExternalTaskSnapshot(
+            id: "claude-ephemeral",
+            sourceKind: .claudeCode,
+            title: "Ephemeral session",
+            workspace: "quebec",
+            status: .running,
+            progress: "Working...",
+            needsInputPrompt: nil,
+            lastError: nil,
+            updatedAt: Date(),
+            deepLinkURL: nil,
+            metadata: [:]
+        )
+        let source = RestartingStubTaskSource(sourceKind: .claudeCode, snapshots: [snapshot])
+
+        await aggregator.register(source)
+        await aggregator.startAll()
+
+        let restarted = expectation(description: "aggregator restarts a finished source")
+        let observer = Task {
+            let deadline = ContinuousClock.now + .seconds(1)
+            while ContinuousClock.now < deadline {
+                if await source.startCount() >= 2 {
+                    restarted.fulfill()
+                    return
+                }
+                try? await Task.sleep(for: .milliseconds(20))
+            }
+        }
+
+        await fulfillment(of: [restarted], timeout: 1.0)
+        observer.cancel()
+        await aggregator.stopAll()
+    }
 }
 
 private final class StubTaskSource: TaskSource, @unchecked Sendable {
@@ -142,5 +179,45 @@ private final class ToggleableStubTaskSource: TaskSource, @unchecked Sendable {
 
     func setAvailable(_ newValue: Bool) async {
         await availability.set(newValue)
+    }
+}
+
+private actor StartCounter {
+    private var count = 0
+
+    func increment() {
+        count += 1
+    }
+
+    func get() -> Int {
+        count
+    }
+}
+
+private final class RestartingStubTaskSource: TaskSource, @unchecked Sendable {
+    let sourceKind: TaskSourceKind
+
+    private let snapshots: [ExternalTaskSnapshot]
+    private let counter = StartCounter()
+
+    init(sourceKind: TaskSourceKind, snapshots: [ExternalTaskSnapshot]) {
+        self.sourceKind = sourceKind
+        self.snapshots = snapshots
+    }
+
+    func startMonitoring() async -> AsyncStream<[ExternalTaskSnapshot]> {
+        await counter.increment()
+        return AsyncStream { continuation in
+            continuation.yield(snapshots)
+            continuation.finish()
+        }
+    }
+
+    func stopMonitoring() async {}
+
+    func isAvailable() async -> Bool { true }
+
+    func startCount() async -> Int {
+        await counter.get()
     }
 }

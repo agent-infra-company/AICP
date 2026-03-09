@@ -52,7 +52,6 @@ final class NotchShellController {
         applyVisibilityPreferences()
         panel.orderFrontRegardless()
         updateNotchInfo()
-        NotchSpace.shared.addWindow(panel)
     }
 
     deinit {
@@ -261,12 +260,12 @@ final class NotchShellController {
     private var primaryScreen: NSScreen? {
         panel.screen
             ?? NSScreen.main
-            ?? NSScreen.screens.first(where: hasHardwareNotch)
+            ?? NSScreen.screens.first(where: Self.hasHardwareNotch)
             ?? NSScreen.screens.first(where: { $0.frame.origin == .zero })
             ?? NSScreen.screens.first
     }
 
-    private func hasHardwareNotch(_ screen: NSScreen) -> Bool {
+    private nonisolated static func hasHardwareNotch(_ screen: NSScreen) -> Bool {
         screen.safeAreaInsets.top > 0
             || (screen.auxiliaryTopLeftArea != nil && screen.auxiliaryTopRightArea != nil)
     }

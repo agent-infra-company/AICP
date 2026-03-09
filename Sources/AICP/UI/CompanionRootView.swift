@@ -272,6 +272,15 @@ private func cliPickerLabel(_ cli: TaskSourceKind) -> String {
     }
 }
 
+private func cliSubmissionHint(_ cli: TaskSourceKind) -> String? {
+    switch cli {
+    case .claudeCode, .codex:
+        return "Launches a new CLI session and copies the prompt to the clipboard for pasting."
+    default:
+        return nil
+    }
+}
+
 private func toastStatusLabel(_ status: TaskStatus) -> String {
     switch status {
     case .completed: return "Done"
@@ -526,6 +535,14 @@ private struct ExpandedCompanionView: View {
                             .background(Color.white.opacity(0.08))
                             .clipShape(Capsule())
                             .padding(.bottom, 4)
+
+                            if let hint = cliSubmissionHint(core.selectedCLI) {
+                                Text(hint)
+                                    .font(.system(size: 11, weight: .medium))
+                                    .foregroundStyle(.white.opacity(0.55))
+                                    .padding(.horizontal, 14)
+                                    .padding(.bottom, 8)
+                            }
 
                             // Rolodex task list (3 visible rows + top/bottom peeks)
                             if displayTasks.isEmpty {

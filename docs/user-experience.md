@@ -16,7 +16,7 @@ Default interaction is click-to-open using an expanded notch-adjacent hit zone.
   - Shows running count and needs-input count.
 
 - Expanded Companion Tabs
-  - `Compose`: submit task prompt to selected profile/route.
+  - `Compose`: submit a task to OpenClaw or launch a CLI session with the prompt copied to the clipboard.
   - `Running`: monitor active queued/running tasks.
   - `Needs Input`: answer follow-up prompts to unblock runs.
   - `History`: review completed/failed/canceled/attention tasks.
@@ -31,7 +31,7 @@ Default interaction is click-to-open using an expanded notch-adjacent hit zone.
 1. Click near hardware notch.
 2. Panel expands.
 3. Select profile + route.
-4. Submit prompt from `Compose`.
+4. Submit a prompt to OpenClaw from `Compose`, or launch a CLI session and paste the copied prompt.
 5. Monitor progress in `Running`.
 6. If follow-up is requested, task moves to `Needs Input` and macOS notification is sent.
 7. Answer question from companion panel.
@@ -61,7 +61,7 @@ Confirmation behavior:
 
 ## UX Constraints and Standards
 
-- Sending a prompt should require minimal interaction (target: under 3 clicks after panel open).
+- Sending a prompt to OpenClaw should require minimal interaction (target: under 3 clicks after panel open).
 - `Needs Input` must be highly visible in both collapsed and expanded states.
 - Errors should be surfaced inline without collapsing context.
 - Closing/opening the panel should be visually stable and predictable.

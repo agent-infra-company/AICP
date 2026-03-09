@@ -191,7 +191,7 @@ final class CompanionCore: ObservableObject {
             .values.flatMap { $0 }
             .map { DisplayTask(from: $0) }
         return (openClawTasks + externalTasks)
-            .sorted(by: displayTaskOrdering)
+            .sorted(by: Self.displayTaskOrdering)
     }
 
     /// Tasks shown in the notch, sorted by most recently updated first, capped at 10.
@@ -208,12 +208,15 @@ final class CompanionCore: ObservableObject {
             .values.flatMap { $0 }
             .map { DisplayTask(from: $0) }
         return (openClawTasks + externalTasks)
-            .sorted(by: displayTaskOrdering)
+            .sorted(by: Self.displayTaskOrdering)
     }
 
     /// Sort by most recently updated first.
-    private func displayTaskOrdering(_ a: DisplayTask, _ b: DisplayTask) -> Bool {
-        a.updatedAt > b.updatedAt
+    private nonisolated static func displayTaskOrdering(_ a: DisplayTask, _ b: DisplayTask) -> Bool {
+        if a.sortPriority != b.sortPriority {
+            return a.sortPriority < b.sortPriority
+        }
+        return a.updatedAt > b.updatedAt
     }
 
     var allRunningCount: Int {
@@ -424,11 +427,9 @@ final class CompanionCore: ObservableObject {
             )
 
             let sentInfo = try await gatewayClient.sendTask(draft, profile: profile)
-            task.taskId = sentInfo.taskId
-            task.sessionId = sentInfo.sessionId
-            task.runId = sentInfo.runId
-            task = try stateMachine.transition(task, to: sentInfo.status)
-            upsert(task)
+            let previousTaskId = task.taskId
+            task = try applyGatewaySubmission(sentInfo, to: task)
+            upsert(task, replacingTaskId: previousTaskId == task.taskId ? nil : previousTaskId)
 
             telemetryManager.record(.taskSubmitted(taskId: task.taskId, profileId: profile.id, routeId: routeId))
         } catch {
@@ -748,10 +749,12 @@ final class CompanionCore: ObservableObject {
                     prompt: task.prompt,
                     clientTaskId: task.taskId
                 )
-                _ = try await gatewayClient.sendTask(retryDraft, profile: profile)
+                let sentInfo = try await gatewayClient.sendTask(retryDraft, profile: profile)
                 task = try stateMachine.transition(task, to: .queued)
+                let previousTaskId = task.taskId
+                task = try applyGatewaySubmission(sentInfo, to: task)
                 task.latestProgress = "Retrying after transient failure"
-                upsert(task)
+                upsert(task, replacingTaskId: previousTaskId == task.taskId ? nil : previousTaskId)
                 return
             }
 
@@ -800,13 +803,33 @@ final class CompanionCore: ObservableObject {
         }
     }
 
-    private func upsert(_ task: TaskRecord) {
-        if let index = tasks.firstIndex(where: { $0.taskId == task.taskId }) {
-            tasks[index] = task
-        } else {
-            tasks.insert(task, at: 0)
-        }
+    private func upsert(_ task: TaskRecord, replacingTaskId previousTaskId: String? = nil) {
+        let idsToReplace = Set([task.taskId, previousTaskId].compactMap { $0 })
+        tasks.removeAll { idsToReplace.contains($0.taskId) }
+        tasks.insert(task, at: 0)
         persistAsync()
+    }
+
+    private func applyGatewaySubmission(_ sentInfo: SentTaskInfo, to task: TaskRecord) throws -> TaskRecord {
+        var updated = task
+        updated.taskId = sentInfo.taskId
+        if let sessionId = sentInfo.sessionId {
+            updated.sessionId = sessionId
+        }
+        if let runId = sentInfo.runId {
+            updated.runId = runId
+        }
+        return try transitionIfNeeded(updated, to: sentInfo.status)
+    }
+
+    private func transitionIfNeeded(_ task: TaskRecord, to status: TaskStatus) throws -> TaskRecord {
+        guard task.status != status else {
+            var updated = task
+            updated.updatedAt = Date()
+            return updated
+        }
+
+        return try stateMachine.transition(task, to: status)
     }
 
     private func apply(state: PersistedState) {
@@ -947,29 +970,6 @@ final class CompanionCore: ObservableObject {
                 break
             }
             showToast(for: snapshot)
-        }
-
-        // Detect disappeared tasks — previously running tasks that are no longer present
-        for old in oldFlat {
-            guard old.status == .running else { continue }
-            let stillPresent = newFlat.contains { $0.id == old.id && $0.sourceKind == old.sourceKind }
-            guard !stillPresent else { continue }
-
-            let completed = ExternalTaskSnapshot(
-                id: old.id,
-                sourceKind: old.sourceKind,
-                title: old.title,
-                workspace: old.workspace,
-                status: .completed,
-                progress: nil,
-                needsInputPrompt: nil,
-                lastError: nil,
-                updatedAt: Date(),
-                deepLinkURL: old.deepLinkURL,
-                metadata: old.metadata
-            )
-            Task { await notificationService.sendExternalTaskCompleted(completed) }
-            showToast(for: completed)
         }
 
         externalSnapshots = new

@@ -11,7 +11,7 @@ AICP lives near your MacBook's notch and acts as a lightweight command center fo
 - **Notch-native UI** — Expands from the macOS notch area with collapsed and expanded layouts
 - **OpenClaw integration** — WebSocket event streaming, HTTP task submission, multi-profile support (local and remote)
 - **Multi-source task monitoring** — Tracks sessions from Claude Code, Codex CLI, Claude Desktop, Cursor, and web AI chats (ChatGPT, Claude, Gemini)
-- **CLI session launcher** — Launch Claude Code and Codex CLI sessions directly from the companion
+- **CLI session launcher** — Launch Claude Code and Codex CLI sessions from the companion, with the composed prompt copied to the clipboard for quick pasting
 - **Deterministic state machine** — Clear task lifecycle: draft → queued → running → needs input → completed/failed
 - **Smart notifications** — macOS notifications for task completion, failure, and follow-up requests with deep-link support
 - **Encrypted persistence** — AES-GCM encryption at rest with Keychain-backed key management
@@ -21,7 +21,7 @@ AICP lives near your MacBook's notch and acts as a lightweight command center fo
 ## Requirements
 
 - macOS 14 (Sonoma) or later
-- Swift 6.1+ (for building from source)
+- Swift 6.0+ (for building from source)
 - An OpenClaw gateway (local or remote) for task orchestration
 
 ## Installation
@@ -35,7 +35,7 @@ AICP lives near your MacBook's notch and acts as a lightweight command center fo
 ```bash
 # Clone the repository
 git clone <repo-url>
-cd victoria-v2
+cd clawy
 
 # Build
 swift build
@@ -51,7 +51,7 @@ swift run
 1. **Launch** the app — the notch companion appears at the top of your primary display
 2. **Configure** a gateway profile during onboarding (default: `http://127.0.0.1:4689`)
 3. **Hover** over the notch area to expand the companion
-4. **Compose** a prompt and send it to an OpenClaw route
+4. **Compose** a prompt and either send it to an OpenClaw route or launch a CLI session with the prompt copied to your clipboard
 5. **Monitor** task progress in the Running tab
 6. **Respond** to follow-up questions in the Needs Input tab
 7. **Review** completed tasks in History
@@ -84,10 +84,9 @@ See [`docs/`](docs/) for detailed product vision, UX documentation, technical ar
 
 ## Contributing
 
-Contributions are welcome. Please open an issue to discuss proposed changes before submitting a pull request.
-
-<!-- TODO: Add GitHub Issues URL -->
+Contributions are welcome. Please open an issue to discuss proposed changes before submitting a pull request:
+<https://github.com/apupneja/clawy/issues>
 
 ## License
 
-<!-- TODO: Add license -->
+[MIT](./LICENSE)

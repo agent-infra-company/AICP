@@ -107,7 +107,16 @@ actor TaskSourceAggregator {
                 guard let self else { return }
                 await self.update(kind: kind, snapshots: snapshots)
             }
+            guard let self else { return }
             Self.log.debug("Monitor stream finished kind=\(kind.rawValue, privacy: .public)")
+            await self.monitorDidFinish(kind: kind)
         }
+    }
+
+    private func monitorDidFinish(kind: TaskSourceKind) {
+        monitorTasks[kind] = nil
+        snapshotCountByKind[kind] = 0
+        currentSnapshots[kind] = []
+        continuation?.yield(currentSnapshots)
     }
 }
