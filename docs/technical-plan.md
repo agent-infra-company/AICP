@@ -15,8 +15,8 @@ The codebase is organized as a layered macOS app:
 
 ### App bootstrap
 
-- `Sources/ClawdbotNotchCompanion/App/ClawdbotNotchCompanionApp.swift`
-- `Sources/ClawdbotNotchCompanion/App/AppDelegate.swift`
+- `Sources/AICP/App/AICPApp.swift`
+- `Sources/AICP/App/AppDelegate.swift`
 
 Responsibilities:
 
@@ -151,7 +151,7 @@ Current unit coverage includes:
 - Command whitelist validation.
 - Encrypted persistence round-trip + plaintext non-leak check.
 
-See `Tests/ClawdbotNotchCompanionTests/` for concrete test cases.
+See `Tests/AICPTests/` for concrete test cases.
 
 ## Build and Run
 

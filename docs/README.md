@@ -1,6 +1,6 @@
-# Clawdbot Notch Companion Docs
+# AICP - AI Control Plane Docs
 
-This folder contains the product and engineering source of truth for the Clawdbot Notch Companion.
+This folder contains the product and engineering source of truth for the AICP - AI Control Plane.
 
 ## Document Map
 
