@@ -186,42 +186,34 @@ final class CompanionCore: ObservableObject {
         let openClawTasks = tasks
             .filter { !$0.status.isTerminal }
             .map { DisplayTask(from: $0, profiles: profiles) }
-        let externalTasks = externalSnapshots.values
-            .flatMap { $0 }
+        let externalTasks = externalSnapshots
+            .filter { $0.key != .webAIChat }
+            .values.flatMap { $0 }
             .map { DisplayTask(from: $0) }
         return (openClawTasks + externalTasks)
             .sorted(by: displayTaskOrdering)
     }
 
-    /// Tasks shown in the notch: all running/active first, then fill to 5 with recent terminal tasks.
+    /// Tasks shown in the notch, sorted by most recently updated first, capped at 10.
     var notchDisplayTasks: [DisplayTask] {
-        let maxVisible = 5
-        let all = allDisplayTasksIncludingTerminal
-        let active = all.filter { !$0.status.isTerminal }
-        if active.count >= maxVisible {
-            return active
-        }
-        let recent = all.filter { $0.status.isTerminal }.prefix(maxVisible - active.count)
-        return active + recent
+        Array(allDisplayTasksIncludingTerminal.prefix(10))
     }
 
     /// All tasks including terminal, for the full task list view.
     var allDisplayTasksIncludingTerminal: [DisplayTask] {
         let openClawTasks = tasks
             .map { DisplayTask(from: $0, profiles: profiles) }
-        let externalTasks = externalSnapshots.values
-            .flatMap { $0 }
+        let externalTasks = externalSnapshots
+            .filter { $0.key != .webAIChat }
+            .values.flatMap { $0 }
             .map { DisplayTask(from: $0) }
         return (openClawTasks + externalTasks)
             .sorted(by: displayTaskOrdering)
     }
 
-    /// Sort by status priority first, then by most recently updated within each group.
+    /// Sort by most recently updated first.
     private func displayTaskOrdering(_ a: DisplayTask, _ b: DisplayTask) -> Bool {
-        if a.sortPriority != b.sortPriority {
-            return a.sortPriority < b.sortPriority
-        }
-        return a.updatedAt > b.updatedAt
+        a.updatedAt > b.updatedAt
     }
 
     var allRunningCount: Int {

@@ -475,7 +475,7 @@ private struct ExpandedCompanionView: View {
                         VStack(alignment: .leading, spacing: 0) {
                             // ChatGPT-style input with inline CLI picker
                             HStack(spacing: 8) {
-                                TextField("Message Clawdbot...", text: $core.composePrompt)
+                                TextField("Make things happen...", text: $core.composePrompt)
                                     .textFieldStyle(.plain)
                                     .font(.system(size: 13))
                                     .foregroundStyle(.white)
