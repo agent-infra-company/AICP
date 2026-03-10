@@ -14,17 +14,26 @@ enum GatewayClientError: Error, LocalizedError {
     case unauthorized
     case unexpectedStatus(Int)
     case malformedResponse
+    case connectionFailed(String)
+    case protocolError(String)
+    case timeout
 
     var errorDescription: String? {
         switch self {
         case .invalidURL:
             "Invalid OpenClaw gateway URL."
         case .unauthorized:
-            "Gateway authorization failed. Check token or profile auth settings."
+            "Gateway authorization failed. Check token or password in profile settings."
         case let .unexpectedStatus(code):
             "Gateway request failed with HTTP \(code)."
         case .malformedResponse:
             "Gateway returned an unexpected response format."
+        case let .connectionFailed(detail):
+            "Gateway connection failed: \(detail)"
+        case let .protocolError(detail):
+            "Protocol error: \(detail)"
+        case .timeout:
+            "Gateway request timed out."
         }
     }
 }

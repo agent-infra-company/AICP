@@ -90,6 +90,7 @@ struct PersistedState: Codable {
     var routeAliasesByProfile: [UUID: [RouteInfo]]
     var settings: AppSettings
     var updatedAt: Date
+    var archivedTaskIds: Set<String>
 
     static func bootstrap() -> PersistedState {
         let localTemplates = CommandTemplateSet.localDefault
@@ -108,7 +109,37 @@ struct PersistedState: Codable {
                 ]
             ],
             settings: settings,
-            updatedAt: Date()
+            updatedAt: Date(),
+            archivedTaskIds: []
         )
+    }
+
+    init(
+        profiles: [ProfileConfig],
+        commandTemplateSets: [CommandTemplateSet],
+        tasks: [TaskRecord],
+        routeAliasesByProfile: [UUID: [RouteInfo]],
+        settings: AppSettings,
+        updatedAt: Date,
+        archivedTaskIds: Set<String> = []
+    ) {
+        self.profiles = profiles
+        self.commandTemplateSets = commandTemplateSets
+        self.tasks = tasks
+        self.routeAliasesByProfile = routeAliasesByProfile
+        self.settings = settings
+        self.updatedAt = updatedAt
+        self.archivedTaskIds = archivedTaskIds
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        profiles = try container.decode([ProfileConfig].self, forKey: .profiles)
+        commandTemplateSets = try container.decode([CommandTemplateSet].self, forKey: .commandTemplateSets)
+        tasks = try container.decode([TaskRecord].self, forKey: .tasks)
+        routeAliasesByProfile = try container.decode([UUID: [RouteInfo]].self, forKey: .routeAliasesByProfile)
+        settings = try container.decode(AppSettings.self, forKey: .settings)
+        updatedAt = try container.decode(Date.self, forKey: .updatedAt)
+        archivedTaskIds = try container.decodeIfPresent(Set<String>.self, forKey: .archivedTaskIds) ?? []
     }
 }

@@ -15,7 +15,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     private var unbundledDebugWindow: NSWindow?
 
     override init() {
-        let secretStore = KeychainSecretStore(service: "com.aicp.app")
+        let secretStore = SecretStoreFactory.create(service: "com.aicp.app")
         let keyProvider = KeychainSymmetricKeyProvider(secretStore: secretStore)
         let persistenceStore = EncryptedPersistenceStore(keyProvider: keyProvider)
         let gatewayClient = OpenClawGatewayClient(secretStore: secretStore)
@@ -36,7 +36,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             telemetryManager: telemetryManager,
             loginItemManager: loginItemManager,
             retentionManager: retentionManager,
-            taskSourceAggregator: aggregator
+            taskSourceAggregator: aggregator,
+            secretStore: secretStore
         )
 
         super.init()

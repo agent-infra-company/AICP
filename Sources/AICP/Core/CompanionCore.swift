@@ -104,6 +104,7 @@ final class CompanionCore: ObservableObject {
 
     @Published var selectedCLI: TaskSourceKind = .claudeCode
     @Published var availableCLIs: [TaskSourceKind] = []
+    @Published var archivedTaskIds: Set<String> = []
 
     private let stateMachine = TaskStateMachine()
     private let gatewayClient: GatewayClient
@@ -115,6 +116,7 @@ final class CompanionCore: ObservableObject {
     private let retentionManager: RetentionManaging
     private let taskSourceAggregator: TaskSourceAggregator
     private let cliSessionLauncher: CLISessionLauncher
+    private let secretStore: SecretStoring?
 
     private var eventTasks: [UUID: Task<Void, Never>] = [:]
     private var aggregatorTask: Task<Void, Never>?
@@ -129,7 +131,8 @@ final class CompanionCore: ObservableObject {
         loginItemManager: LoginItemManaging,
         retentionManager: RetentionManaging,
         taskSourceAggregator: TaskSourceAggregator,
-        cliSessionLauncher: CLISessionLauncher = CLISessionLauncher()
+        cliSessionLauncher: CLISessionLauncher = CLISessionLauncher(),
+        secretStore: SecretStoring? = nil
     ) {
         self.gatewayClient = gatewayClient
         self.runtimeManager = runtimeManager
@@ -140,6 +143,7 @@ final class CompanionCore: ObservableObject {
         self.retentionManager = retentionManager
         self.taskSourceAggregator = taskSourceAggregator
         self.cliSessionLauncher = cliSessionLauncher
+        self.secretStore = secretStore
     }
 
     deinit {
@@ -191,6 +195,7 @@ final class CompanionCore: ObservableObject {
             .values.flatMap { $0 }
             .map { DisplayTask(from: $0) }
         return (openClawTasks + externalTasks)
+            .filter { !archivedTaskIds.contains($0.id) }
             .sorted(by: Self.displayTaskOrdering)
     }
 
@@ -208,6 +213,7 @@ final class CompanionCore: ObservableObject {
             .values.flatMap { $0 }
             .map { DisplayTask(from: $0) }
         return (openClawTasks + externalTasks)
+            .filter { !archivedTaskIds.contains($0.id) }
             .sorted(by: Self.displayTaskOrdering)
     }
 
@@ -255,6 +261,14 @@ final class CompanionCore: ObservableObject {
                 "No activation target or deep link available for source=\(displayTask.sourceKind.rawValue, privacy: .public)"
             )
         }
+    }
+
+    func archiveTask(_ displayTask: DisplayTask) {
+        Self.log.info(
+            "Archiving task id=\(displayTask.id, privacy: .public) source=\(displayTask.sourceKind.rawValue, privacy: .public)"
+        )
+        archivedTaskIds.insert(displayTask.id)
+        persistAsync()
     }
 
     @discardableResult
@@ -347,7 +361,6 @@ final class CompanionCore: ObservableObject {
 
     func setExpanded(_ expanded: Bool) {
         if !expanded {
-            guard !isSubmitting else { return }
             guard pendingRuntimeOperation == nil else { return }
             showingFullTaskList = false
         }
@@ -430,6 +443,8 @@ final class CompanionCore: ObservableObject {
             let previousTaskId = task.taskId
             task = try applyGatewaySubmission(sentInfo, to: task)
             upsert(task, replacingTaskId: previousTaskId == task.taskId ? nil : previousTaskId)
+            showToast(for: task)
+            setExpanded(false)
 
             telemetryManager.record(.taskSubmitted(taskId: task.taskId, profileId: profile.id, routeId: routeId))
         } catch {
@@ -591,6 +606,10 @@ final class CompanionCore: ObservableObject {
         persistAsync()
     }
 
+    func saveCredential(_ value: String, forRef ref: String) {
+        try? secretStore?.setSecret(value, for: ref)
+    }
+
     func upsertCommandTemplateSet(_ templateSet: CommandTemplateSet) {
         if let index = commandTemplateSets.firstIndex(where: { $0.id == templateSet.id }) {
             commandTemplateSets[index] = templateSet
@@ -638,6 +657,18 @@ final class CompanionCore: ObservableObject {
     }
 
     private func ensureRuntimeHealthy(for profile: ProfileConfig) async throws {
+        // Remote gateways can be managed externally; don't block task submission
+        // on runtime SSH controls when no SSH target is configured.
+        if profile.kind == .remote,
+           profile.sshRef?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true {
+            runtimeStatusByProfile[profile.id] = RuntimeStatus(
+                isHealthy: true,
+                detail: "Runtime managed externally",
+                checkedAt: Date()
+            )
+            return
+        }
+
         let status = try await runtimeManager.status(profileId: profile.id)
         runtimeStatusByProfile[profile.id] = status
         if status.isHealthy {
@@ -682,42 +713,55 @@ final class CompanionCore: ObservableObject {
     }
 
     private func process(event: GatewayEventEnvelope) async {
-        guard let taskId = event.taskId,
-              var task = tasks.first(where: { $0.taskId == taskId }) else {
+        guard var task = taskMatching(event: event) else {
             return
         }
 
         do {
-            switch event.eventType {
-            case "progress", "run_progress":
-                if task.status == .queued {
-                    task = try stateMachine.transition(task, to: .running)
-                }
-                task.latestProgress = event.payload["message"] ?? "Working"
-            case "needs_input", "question":
-                task = try stateMachine.transition(task, to: .needsInput)
-                task.needsInputPrompt = event.payload["question"] ?? event.payload["prompt"] ?? "Agent needs input"
+            let previousStatus = task.status
+            let previousTaskId = task.taskId
+
+            switch eventStatus(for: event) {
+            case let .progress(message):
+                task = try transitionIfNeeded(task, to: .running)
+                task.latestProgress = message ?? event.payload["summary"] ?? "Working"
+            case let .needsInput(prompt):
+                task = try transitionIfNeeded(task, to: .needsInput)
+                task.needsInputPrompt = prompt ?? "Agent needs input"
                 await notificationService.sendTaskNeedsInput(task)
-            case "completed", "done":
-                task = try stateMachine.transition(task, to: .completed)
+            case let .completed(message):
+                task = try transitionIfNeeded(task, to: .completed)
+                if let message, !message.isEmpty {
+                    task.latestProgress = message
+                }
                 await notificationService.sendTaskCompleted(task)
-            case "failed", "error":
-                let reason = event.payload["error"] ?? "Run failed"
+            case let .failed(reason):
                 await handleTaskFailure(taskId: task.taskId, reason: reason)
                 return
-            case "canceled":
-                task = try stateMachine.transition(task, to: .canceled)
-            default:
-                task.latestProgress = event.payload["message"] ?? "Event: \(event.eventType)"
+            case .canceled:
+                task = try transitionIfNeeded(task, to: .canceled)
+            case let .ignored(message):
+                if let message, !message.isEmpty {
+                    task.latestProgress = message
+                }
             }
 
+            if let canonicalTaskId = event.taskId, !canonicalTaskId.isEmpty {
+                task.taskId = canonicalTaskId
+            } else if let runId = event.runId, !runId.isEmpty {
+                task.taskId = runId
+            }
             if let runId = event.runId {
                 task.runId = runId
             }
             if let sessionId = event.sessionId {
                 task.sessionId = sessionId
             }
-            upsert(task)
+            upsert(task, replacingTaskId: previousTaskId == task.taskId ? nil : previousTaskId)
+
+            if shouldShowOpenClawToast(from: previousStatus, to: task.status) {
+                showToast(for: task)
+            }
         } catch {
             telemetryManager.record(.error("Event processing failed for \(task.taskId): \(error.localizedDescription)"))
         }
@@ -760,6 +804,7 @@ final class CompanionCore: ObservableObject {
 
             task = try stateMachine.transition(task, to: .needsAttention)
             upsert(task)
+            showToast(for: task)
             await notificationService.sendTaskFailed(task)
         } catch {
             lastErrorBanner = "Task failure handling error: \(error.localizedDescription)"
@@ -829,7 +874,139 @@ final class CompanionCore: ObservableObject {
             return updated
         }
 
+        if task.status == .queued && (status == .needsInput || status == .completed) {
+            let running = try transitionIfNeeded(task, to: .running)
+            return try transitionIfNeeded(running, to: status)
+        }
+
+        if task.status == .needsInput && status == .completed {
+            let running = try transitionIfNeeded(task, to: .running)
+            return try transitionIfNeeded(running, to: status)
+        }
+
         return try stateMachine.transition(task, to: status)
+    }
+
+    private func taskMatching(event: GatewayEventEnvelope) -> TaskRecord? {
+        tasks.first { task in
+            if let taskId = event.taskId, task.taskId == taskId {
+                return true
+            }
+            if let runId = event.runId, task.runId == runId || task.taskId == runId {
+                return true
+            }
+            if let sessionId = event.sessionId, task.sessionId == sessionId {
+                return true
+            }
+            return false
+        }
+    }
+
+    private enum GatewayTaskEventStatus {
+        case progress(String?)
+        case needsInput(String?)
+        case completed(String?)
+        case failed(String)
+        case canceled
+        case ignored(String?)
+    }
+
+    private func eventStatus(for event: GatewayEventEnvelope) -> GatewayTaskEventStatus {
+        switch event.eventType {
+        case "progress", "run_progress":
+            return .progress(event.payload["message"])
+        case "needs_input", "question":
+            return .needsInput(event.payload["question"] ?? event.payload["prompt"])
+        case "completed", "done":
+            return .completed(event.payload["message"] ?? event.payload["summary"])
+        case "failed", "error":
+            return .failed(event.payload["error"] ?? event.payload["message"] ?? "Run failed")
+        case "canceled":
+            return .canceled
+        case "agent":
+            return agentEventStatus(payload: event.payload)
+        case "chat":
+            return chatEventStatus(payload: event.payload)
+        case "exec.approval.requested":
+            return .needsInput(approvalPrompt(payload: event.payload))
+        case "exec.approval.resolved":
+            let decision = event.payload["decision"]?.lowercased()
+            if decision == "deny" {
+                return .failed("Approval denied")
+            }
+            return .progress("Approval resolved")
+        default:
+            return .ignored(event.payload["message"])
+        }
+    }
+
+    private func agentEventStatus(payload: [String: String]) -> GatewayTaskEventStatus {
+        let stream = payload["stream"]?.lowercased()
+        let phase = payload["phase"]?.lowercased()
+
+        if stream == "lifecycle" {
+            switch phase {
+            case "start":
+                return .progress(payload["summary"] ?? "Working")
+            case "end":
+                if payload["aborted"]?.lowercased() == "true" {
+                    return .canceled
+                }
+                return .completed(payload["summary"])
+            case "error":
+                return .failed(payload["error"] ?? "Run failed")
+            default:
+                break
+            }
+        }
+
+        if stream == "assistant" || stream == "tool" {
+            return .progress(payload["text"] ?? payload["message"] ?? payload["summary"])
+        }
+
+        if let status = payload["status"].flatMap(TaskStatus.fromGateway) {
+            switch status {
+            case .queued, .running:
+                return .progress(payload["message"] ?? payload["summary"])
+            case .needsInput:
+                return .needsInput(payload["question"] ?? payload["prompt"])
+            case .completed:
+                return .completed(payload["summary"])
+            case .failed, .needsAttention:
+                return .failed(payload["error"] ?? payload["message"] ?? "Run failed")
+            case .canceled:
+                return .canceled
+            case .draft:
+                return .ignored(nil)
+            }
+        }
+
+        return .ignored(payload["message"] ?? payload["summary"])
+    }
+
+    private func chatEventStatus(payload: [String: String]) -> GatewayTaskEventStatus {
+        switch payload["state"]?.lowercased() {
+        case "delta":
+            return .progress(payload["text"] ?? payload["message"] ?? "Responding")
+        case "final":
+            return .completed(payload["text"] ?? payload["summary"])
+        case "error":
+            return .failed(payload["error"] ?? payload["message"] ?? "Run failed")
+        case "aborted":
+            return .canceled
+        default:
+            return .ignored(payload["message"] ?? payload["text"])
+        }
+    }
+
+    private func approvalPrompt(payload: [String: String]) -> String {
+        if let command = payload["request.commandArgv"], !command.isEmpty {
+            return "Approval required: \(command)"
+        }
+        if let command = payload["request.command"], !command.isEmpty {
+            return "Approval required: \(command)"
+        }
+        return "Approval required"
     }
 
     private func apply(state: PersistedState) {
@@ -838,6 +1015,7 @@ final class CompanionCore: ObservableObject {
         tasks = state.tasks
         routesByProfile = state.routeAliasesByProfile
         settings = state.settings
+        archivedTaskIds = state.archivedTaskIds
 
         if settings.selectedProfileId == nil {
             settings.selectedProfileId = profiles.first?.id
@@ -853,7 +1031,8 @@ final class CompanionCore: ObservableObject {
             tasks: tasks,
             routeAliasesByProfile: routesByProfile,
             settings: settings,
-            updatedAt: Date()
+            updatedAt: Date(),
+            archivedTaskIds: archivedTaskIds
         )
 
         Task {
@@ -919,6 +1098,43 @@ final class CompanionCore: ObservableObject {
         }
     }
 
+    func showToast(for task: TaskRecord) {
+        let display = DisplayTask(from: task, profiles: profiles)
+        let toast = NotchToast(
+            id: UUID(),
+            sourceKind: .openClaw,
+            title: task.title,
+            status: task.status,
+            displayTask: display
+        )
+        toastDismissTask?.cancel()
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+            activeToast = toast
+        }
+        toastDismissTask = Task {
+            try? await Task.sleep(for: .seconds(4))
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                withAnimation(.easeOut(duration: 0.3)) {
+                    if self.activeToast?.id == toast.id {
+                        self.activeToast = nil
+                    }
+                }
+            }
+        }
+    }
+
+    private func shouldShowOpenClawToast(from previousStatus: TaskStatus, to currentStatus: TaskStatus) -> Bool {
+        guard previousStatus != currentStatus else { return false }
+
+        switch currentStatus {
+        case .running, .needsInput, .completed, .failed, .needsAttention, .canceled:
+            return true
+        default:
+            return false
+        }
+    }
+
     func dismissToast() {
         toastDismissTask?.cancel()
         withAnimation(.easeOut(duration: 0.3)) {
@@ -928,8 +1144,22 @@ final class CompanionCore: ObservableObject {
 
     func handleToastTap() {
         guard let toast = activeToast else { return }
-        openTask(toast.displayTask)
         dismissToast()
+
+        // For OpenClaw tasks, select the task in the expanded view
+        if toast.sourceKind == .openClaw {
+            let rawId = String(toast.displayTask.id.dropFirst("openclaw-".count))
+            focusTask(rawId)
+        } else {
+            // For external tasks, just expand the notch
+            setExpanded(true)
+        }
+    }
+
+    func handleToastLongHover() {
+        guard activeToast != nil else { return }
+        dismissToast()
+        setExpanded(true)
     }
 
     private func startExternalTaskMonitoring() async {

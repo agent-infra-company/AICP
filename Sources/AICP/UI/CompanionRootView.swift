@@ -115,6 +115,7 @@ private struct NotchOutlineShape: Shape {
 private struct NotchGradientCollapsedView: View {
     @ObservedObject var core: CompanionCore
     @State private var toastExpanded = false
+    @State private var toastHoverTimer: DispatchWorkItem?
 
     private var info: NotchDisplayInfo { core.notchDisplayInfo }
     private var glowColor: Color { Color(hex: core.settings.glowColorHex) }
@@ -241,6 +242,13 @@ private struct NotchGradientCollapsedView: View {
                 )
                 .contentShape(Rectangle())
                 .onTapGesture { core.handleToastTap() }
+                .onHover { hovering in
+                    if hovering {
+                        startToastHoverTimer()
+                    } else {
+                        cancelToastHoverTimer()
+                    }
+                }
             }
         }
         .frame(width: toastExpandedWidth, height: info.notchHeight)
@@ -260,6 +268,22 @@ private struct NotchGradientCollapsedView: View {
                 toastExpanded = false
             }
         }
+    }
+
+    private func startToastHoverTimer() {
+        guard toastHoverTimer == nil else { return }
+        let item = DispatchWorkItem { [core] in
+            Task { @MainActor in
+                core.handleToastLongHover()
+            }
+        }
+        toastHoverTimer = item
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: item)
+    }
+
+    private func cancelToastHoverTimer() {
+        toastHoverTimer?.cancel()
+        toastHoverTimer = nil
     }
 }
 
@@ -295,6 +319,7 @@ private func toastStatusLabel(_ status: TaskStatus) -> String {
 private struct PillCollapsedView: View {
     @ObservedObject var core: CompanionCore
     @State private var toastExpanded = false
+    @State private var toastHoverTimer: DispatchWorkItem?
 
     private var currentWidth: CGFloat {
         toastExpanded ? toastExpandedWidth : 340
@@ -368,6 +393,13 @@ private struct PillCollapsedView: View {
                 core.setExpanded(true)
             }
         }
+        .onHover { hovering in
+            if hovering && core.activeToast != nil {
+                startToastHoverTimer()
+            } else {
+                cancelToastHoverTimer()
+            }
+        }
         .animation(.spring(response: 0.45, dampingFraction: 0.75), value: toastExpanded)
         .onChange(of: core.activeToast) { _, newToast in
             if newToast != nil {
@@ -376,6 +408,22 @@ private struct PillCollapsedView: View {
                 toastExpanded = false
             }
         }
+    }
+
+    private func startToastHoverTimer() {
+        guard toastHoverTimer == nil else { return }
+        let item = DispatchWorkItem { [core] in
+            Task { @MainActor in
+                core.handleToastLongHover()
+            }
+        }
+        toastHoverTimer = item
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: item)
+    }
+
+    private func cancelToastHoverTimer() {
+        toastHoverTimer?.cancel()
+        toastHoverTimer = nil
     }
 }
 
@@ -563,7 +611,9 @@ private struct ExpandedCompanionView: View {
                                         core.openTask(displayTasks[index])
                                     }
                                 ) { index in
-                                    UnifiedTaskRow(task: displayTasks[index])
+                                    UnifiedTaskRow(task: displayTasks[index]) {
+                                        core.archiveTask(displayTasks[index])
+                                    }
                                         .frame(height: rolodexRowHeight)
                                 }
                             }
@@ -936,6 +986,9 @@ private struct StaticTaskRow: View {
 
 private struct UnifiedTaskRow: View {
     let task: DisplayTask
+    var onArchive: (() -> Void)?
+
+    @State private var isHovered = false
 
     private var gridMode: SnakeGridMode {
         switch task.status {
@@ -1002,9 +1055,37 @@ private struct UnifiedTaskRow: View {
                 .lineLimit(1)
 
             Spacer(minLength: 0)
+
+            if isHovered, let onArchive {
+                Button {
+                    onArchive()
+                } label: {
+                    Image(systemName: "archivebox")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.4))
+                }
+                .buttonStyle(.plain)
+                .onHover { hovering in
+                    if hovering {
+                        NSCursor.pointingHand.push()
+                    } else {
+                        NSCursor.pop()
+                    }
+                }
+                .transition(.opacity)
+            }
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 7)
+        .background(
+            RoundedRectangle(cornerRadius: 6)
+                .fill(isHovered ? Color.white.opacity(0.06) : Color.clear)
+        )
+        .onHover { hovering in
+            withAnimation(.easeInOut(duration: 0.15)) {
+                isHovered = hovering
+            }
+        }
     }
 }
 
@@ -1063,7 +1144,9 @@ private struct FullTaskListView: View {
             ScrollView(.vertical, showsIndicators: true) {
                 LazyVStack(spacing: 0) {
                     ForEach(visibleTasks) { task in
-                        UnifiedTaskRow(task: task)
+                        UnifiedTaskRow(task: task) {
+                            core.archiveTask(task)
+                        }
                             .frame(height: rolodexRowHeight)
                             .contentShape(Rectangle())
                             .onTapGesture {

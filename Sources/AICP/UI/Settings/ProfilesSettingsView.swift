@@ -49,9 +49,9 @@ struct ProfilesSettingsView: View {
                                     name: "Remote OpenClaw",
                                     kind: .remote,
                                     gatewayURL: URL(string: "https://example-gateway.local")!,
-                                    authMode: .bearerToken,
-                                    tokenRef: "remote.gateway.token",
-                                    sshRef: "user@remote-host",
+                                    authMode: .token,
+                                    tokenRef: "remote.gateway.token.\(UUID().uuidString.prefix(8))",
+                                    sshRef: nil,
                                     commandTemplateSetId: templateId,
                                     enabled: true
                                 )
@@ -64,7 +64,10 @@ struct ProfilesSettingsView: View {
                             ProfileEditorRow(
                                 profile: profile,
                                 templateSets: core.commandTemplateSets,
-                                onSave: { core.upsertProfile($0) }
+                                onSave: { core.upsertProfile($0) },
+                                onSaveCredential: { ref, value in
+                                    core.saveCredential(value, forRef: ref)
+                                }
                             )
                         }
                     }
@@ -89,9 +92,12 @@ struct ProfileEditorRow: View {
     @State var profile: ProfileConfig
     let templateSets: [CommandTemplateSet]
     let onSave: (ProfileConfig) -> Void
+    let onSaveCredential: (String, String) -> Void
 
     @State private var gatewayURLText: String = ""
+    @State private var credentialText: String = ""
     @State private var validationError: String?
+    @State private var credentialSaved = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -119,17 +125,45 @@ struct ProfileEditorRow: View {
             }
 
             Picker("Auth", selection: $profile.authMode) {
-                Text("None").tag(ProfileAuthMode.none)
-                Text("Bearer token").tag(ProfileAuthMode.bearerToken)
+                Text("None (local)").tag(ProfileAuthMode.none)
+                Text("Token").tag(ProfileAuthMode.token)
+                Text("Password").tag(ProfileAuthMode.password)
+            }
+            .onChange(of: profile.authMode) { _, newValue in
+                // Auto-generate a tokenRef if switching to an auth mode that needs one
+                let normalized = newValue.normalized
+                if (normalized == .token || normalized == .password) && (profile.tokenRef ?? "").isEmpty {
+                    profile.tokenRef = "gateway.credential.\(profile.id.uuidString.prefix(8))"
+                }
+                credentialText = ""
+                credentialSaved = false
             }
 
-            TextField(
-                "Token reference",
-                text: Binding(
-                    get: { profile.tokenRef ?? "" },
-                    set: { profile.tokenRef = $0.isEmpty ? nil : $0 }
-                )
-            )
+            if profile.authMode.normalized == .token || profile.authMode.normalized == .password {
+                HStack {
+                    SecureField(
+                        profile.authMode.normalized == .password ? "Password" : "Token",
+                        text: $credentialText
+                    )
+                    .onChange(of: credentialText) { _, _ in
+                        credentialSaved = false
+                    }
+
+                    if credentialSaved {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundStyle(.green)
+                            .font(.system(size: 14))
+                    }
+                }
+                .onAppear {
+                    // Show placeholder indicating a credential is stored
+                    credentialText = ""
+                }
+
+                Text("Enter your gateway \(profile.authMode.normalized == .password ? "password" : "token"). This is stored securely in your keychain.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+            }
 
             TextField(
                 "SSH reference (remote)",
@@ -159,6 +193,14 @@ struct ProfileEditorRow: View {
                         return
                     }
                     validationError = nil
+
+                    // Save credential to keychain if entered
+                    let trimmedCred = credentialText.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !trimmedCred.isEmpty, let ref = profile.tokenRef {
+                        onSaveCredential(ref, trimmedCred)
+                        credentialSaved = true
+                    }
+
                     onSave(profile)
                 }
             }

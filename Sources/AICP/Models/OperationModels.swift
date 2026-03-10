@@ -29,7 +29,7 @@ struct LocalCommandContext {
 
     static func from(profile: ProfileConfig) -> LocalCommandContext {
         let host = profile.gatewayURL.host ?? "127.0.0.1"
-        let port = profile.gatewayURL.port.map(String.init) ?? "4689"
+        let port = profile.gatewayURL.port.map(String.init) ?? "18789"
         return LocalCommandContext(profileName: profile.name, gatewayURL: profile.gatewayURL, host: host, port: port)
     }
 

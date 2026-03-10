@@ -102,7 +102,7 @@ struct OnboardingNotificationStep: View {
 struct OnboardingProfileStep: View {
     @ObservedObject var core: CompanionCore
     @State private var profileName = "Local OpenClaw"
-    @State private var gatewayURL = "http://127.0.0.1:4689"
+    @State private var gatewayURL = "http://127.0.0.1:18789"
     @State private var validationError: String?
 
     var body: some View {
@@ -139,7 +139,7 @@ struct OnboardingProfileStep: View {
                             if let url = URL(string: newValue), url.scheme != nil, url.host != nil {
                                 validationError = nil
                             } else if !newValue.isEmpty {
-                                validationError = "Enter a valid URL (e.g. http://127.0.0.1:4689)"
+                                validationError = "Enter a valid URL (e.g. http://127.0.0.1:18789)"
                             }
                         }
                 }
@@ -170,7 +170,7 @@ struct OnboardingProfileStep: View {
             return
         }
         guard let url = URL(string: gatewayURL), url.scheme != nil, url.host != nil else {
-            validationError = "Enter a valid URL (e.g. http://127.0.0.1:4689)"
+            validationError = "Enter a valid URL (e.g. http://127.0.0.1:18789)"
             return
         }
         if var existing = core.profiles.first {

@@ -34,12 +34,19 @@ actor EncryptedPersistenceStore: PersistenceStore {
 
         if let fileURL {
             self.fileURL = fileURL
-        } else {
+        } else if AppRuntimeEnvironment.current.isBundledApp {
             let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
                 ?? URL(fileURLWithPath: NSTemporaryDirectory())
             self.fileURL = appSupport
                 .appendingPathComponent("AICP", isDirectory: true)
                 .appendingPathComponent("state.enc")
+        } else {
+            // Unbundled mode uses a separate state file to avoid conflicts
+            // with a signed app instance using keychain-based encryption.
+            let dir = FileManager.default.homeDirectoryForCurrentUser
+                .appendingPathComponent(".aicp")
+            try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            self.fileURL = dir.appendingPathComponent("state.enc")
         }
 
         self.encoder = JSONEncoder()
@@ -56,15 +63,25 @@ actor EncryptedPersistenceStore: PersistenceStore {
             return bootstrap
         }
 
-        let encryptedData = try Data(contentsOf: fileURL)
-        let key = try keyProvider.loadOrCreateKey(reference: keyReference)
+        do {
+            let encryptedData = try Data(contentsOf: fileURL)
+            let key = try keyProvider.loadOrCreateKey(reference: keyReference)
 
-        guard let sealedBox = try? AES.GCM.SealedBox(combined: encryptedData) else {
-            throw PersistenceError.corruptCiphertext
+            guard let sealedBox = try? AES.GCM.SealedBox(combined: encryptedData) else {
+                throw PersistenceError.corruptCiphertext
+            }
+
+            let plaintext = try AES.GCM.open(sealedBox, using: key)
+            return try decoder.decode(PersistedState.self, from: plaintext)
+        } catch {
+            // Decryption or decode failed — likely a stale key from a different
+            // secret store backend (e.g. switching between keychain and file store).
+            // Reset to fresh state so the app remains usable.
+            try? FileManager.default.removeItem(at: fileURL)
+            let bootstrap = PersistedState.bootstrap()
+            try await saveState(bootstrap)
+            return bootstrap
         }
-
-        let plaintext = try AES.GCM.open(sealedBox, using: key)
-        return try decoder.decode(PersistedState.self, from: plaintext)
     }
 
     func saveState(_ state: PersistedState) async throws {

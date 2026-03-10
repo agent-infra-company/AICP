@@ -25,6 +25,7 @@ final class CompanionCoreSubmissionTests: XCTestCase {
 
         await core.bootstrap()
         core.selectCLI(.openClaw)
+        core.isExpanded = true
         core.composePrompt = "Ship the release notes"
 
         await core.submitPrompt()
@@ -34,6 +35,9 @@ final class CompanionCoreSubmissionTests: XCTestCase {
         XCTAssertEqual(core.tasks.first?.sessionId, "session-1")
         XCTAssertEqual(core.tasks.first?.runId, "run-1")
         XCTAssertEqual(core.tasks.first?.status, .running)
+        XCTAssertEqual(core.activeToast?.sourceKind, .openClaw)
+        XCTAssertEqual(core.activeToast?.status, .running)
+        XCTAssertFalse(core.isExpanded)
     }
 
     func testRetryPathRekeysTaskWhenRetryReceivesCanonicalTaskID() async throws {
@@ -71,13 +75,182 @@ final class CompanionCoreSubmissionTests: XCTestCase {
         XCTAssertEqual(core.tasks.first?.latestProgress, "Retrying after transient failure")
     }
 
+    func testModernGatewayEventsUpdateTaskWithoutLegacyTaskIdentifier() async throws {
+        let persistenceStore = StubPersistenceStore(state: PersistedState.bootstrap())
+        let gatewayClient = StubGatewayClient(
+            sendTaskResponses: [
+                .success(
+                    SentTaskInfo(
+                        taskId: "run-42",
+                        sessionId: "agent:main:main",
+                        runId: "run-42",
+                        status: .queued
+                    )
+                )
+            ]
+        )
+        let core = makeCore(
+            gatewayClient: gatewayClient,
+            persistenceStore: persistenceStore
+        )
+
+        await core.bootstrap()
+        core.selectCLI(.openClaw)
+        core.composePrompt = "Summarize the deployment state"
+
+        await core.submitPrompt()
+        await gatewayClient.emit(
+            GatewayEventEnvelope(
+                source: "Local OpenClaw",
+                sessionId: "agent:main:main",
+                runId: "run-42",
+                taskId: nil,
+                eventType: "agent",
+                payload: [
+                    "stream": "lifecycle",
+                    "phase": "start",
+                    "summary": "Agent started"
+                ]
+            )
+        )
+        await Task.yield()
+
+        XCTAssertEqual(core.tasks.first?.status, .running)
+        XCTAssertEqual(core.tasks.first?.latestProgress, "Agent started")
+
+        await gatewayClient.emit(
+            GatewayEventEnvelope(
+                source: "Local OpenClaw",
+                sessionId: "agent:main:main",
+                runId: "run-42",
+                taskId: nil,
+                eventType: "chat",
+                payload: [
+                    "state": "final",
+                    "text": "Deployment looks healthy."
+                ]
+            )
+        )
+        await Task.yield()
+
+        XCTAssertEqual(core.tasks.first?.status, .completed)
+        XCTAssertEqual(core.tasks.first?.runId, "run-42")
+        XCTAssertEqual(core.tasks.first?.sessionId, "agent:main:main")
+    }
+
+    func testApprovalEventMovesTaskToNeedsInputUsingSessionKeyCorrelation() async throws {
+        let persistenceStore = StubPersistenceStore(state: PersistedState.bootstrap())
+        let gatewayClient = StubGatewayClient(
+            sendTaskResponses: [
+                .success(
+                    SentTaskInfo(
+                        taskId: "run-approval",
+                        sessionId: "agent:main:main",
+                        runId: "run-approval",
+                        status: .running
+                    )
+                )
+            ]
+        )
+        let core = makeCore(
+            gatewayClient: gatewayClient,
+            persistenceStore: persistenceStore
+        )
+
+        await core.bootstrap()
+        core.selectCLI(.openClaw)
+        core.composePrompt = "Run the deployment command"
+
+        await core.submitPrompt()
+        await gatewayClient.emit(
+            GatewayEventEnvelope(
+                source: "Local OpenClaw",
+                sessionId: "agent:main:main",
+                runId: "run-approval",
+                taskId: nil,
+                eventType: "exec.approval.requested",
+                payload: [
+                    "request.sessionKey": "agent:main:main",
+                    "request.commandArgv": "deploy --prod"
+                ]
+            )
+        )
+        let deadline = Date().addingTimeInterval(1)
+        while Date() < deadline, core.tasks.first?.status != .needsInput {
+            await Task.yield()
+        }
+
+        XCTAssertEqual(core.tasks.first?.status, .needsInput)
+        XCTAssertEqual(core.tasks.first?.needsInputPrompt, "Approval required: deploy --prod")
+    }
+
+    func testCollapseIsAllowedWhileSubmitting() async throws {
+        let persistenceStore = StubPersistenceStore(state: PersistedState.bootstrap())
+        let gatewayClient = StubGatewayClient(sendTaskResponses: [])
+        let core = makeCore(
+            gatewayClient: gatewayClient,
+            persistenceStore: persistenceStore
+        )
+
+        await core.bootstrap()
+        core.isExpanded = true
+        core.isSubmitting = true
+
+        core.setExpanded(false)
+
+        XCTAssertFalse(core.isExpanded)
+    }
+
+    func testSubmitPromptSkipsRuntimeSSHCheckForRemoteWithoutSSHReference() async throws {
+        let persistenceStore = StubPersistenceStore(state: PersistedState.bootstrap())
+        let gatewayClient = StubGatewayClient(
+            sendTaskResponses: [
+                .success(
+                    SentTaskInfo(
+                        taskId: "remote-task-1",
+                        sessionId: "agent:main:main",
+                        runId: "remote-task-1",
+                        status: .running
+                    )
+                )
+            ]
+        )
+        let runtimeManager = MissingSSHRuntimeManager()
+        let core = makeCore(
+            gatewayClient: gatewayClient,
+            persistenceStore: persistenceStore,
+            runtimeManager: runtimeManager
+        )
+
+        await core.bootstrap()
+        guard var profile = core.profiles.first else {
+            XCTFail("Expected bootstrap profile")
+            return
+        }
+        profile.kind = .remote
+        profile.gatewayURL = URL(string: "https://example-gateway.local")!
+        profile.sshRef = nil
+        core.upsertProfile(profile)
+        core.selectProfile(profile.id)
+        core.selectCLI(.openClaw)
+        core.composePrompt = "Send to remote gateway"
+
+        await core.submitPrompt()
+
+        let statusCalls = await runtimeManager.statusCallCount()
+        XCTAssertEqual(statusCalls, 0)
+        XCTAssertEqual(core.tasks.first?.taskId, "remote-task-1")
+        XCTAssertEqual(core.tasks.first?.status, .running)
+    }
+
     private func makeCore(
         gatewayClient: GatewayClient,
-        persistenceStore: PersistenceStore
+        persistenceStore: PersistenceStore,
+        runtimeManager: RuntimeManager = StubRuntimeManager()
     ) -> CompanionCore {
         CompanionCore(
             gatewayClient: gatewayClient,
-            runtimeManager: StubRuntimeManager(),
+            runtimeManager: runtimeManager,
             persistenceStore: persistenceStore,
             notificationService: StubNotificationService(),
             telemetryManager: StubTelemetryManager(),
@@ -94,9 +267,16 @@ private enum StubError: Error {
 
 private actor StubGatewayClient: GatewayClient {
     private var sendTaskResponses: [Result<SentTaskInfo, Error>]
+    private let eventStream: AsyncStream<GatewayEventEnvelope>
+    private let eventContinuation: AsyncStream<GatewayEventEnvelope>.Continuation
 
     init(sendTaskResponses: [Result<SentTaskInfo, Error>]) {
         self.sendTaskResponses = sendTaskResponses
+        var continuation: AsyncStream<GatewayEventEnvelope>.Continuation?
+        self.eventStream = AsyncStream { streamContinuation in
+            continuation = streamContinuation
+        }
+        self.eventContinuation = continuation!
     }
 
     func connect(profile: ProfileConfig) async throws {}
@@ -115,9 +295,11 @@ private actor StubGatewayClient: GatewayClient {
     func answerFollowUp(task: TaskRecord, answer: String, profile: ProfileConfig) async throws {}
 
     func subscribeEvents(profileId: UUID) async -> AsyncStream<GatewayEventEnvelope> {
-        AsyncStream { continuation in
-            continuation.finish()
-        }
+        eventStream
+    }
+
+    func emit(_ event: GatewayEventEnvelope) {
+        eventContinuation.yield(event)
     }
 }
 
@@ -142,6 +324,33 @@ private actor StubRuntimeManager: RuntimeManager {
 
     private func healthyStatus() -> RuntimeStatus {
         RuntimeStatus(isHealthy: true, detail: "Healthy", checkedAt: Date())
+    }
+}
+
+private actor MissingSSHRuntimeManager: RuntimeManager {
+    private var statusCalls = 0
+
+    func updateConfiguration(profiles: [ProfileConfig], templateSets: [CommandTemplateSet]) async {}
+
+    func start(profileId: UUID) async throws -> RuntimeStatus {
+        throw RuntimeManagerError.missingSSHReference
+    }
+
+    func stop(profileId: UUID) async throws -> RuntimeStatus {
+        throw RuntimeManagerError.missingSSHReference
+    }
+
+    func restart(profileId: UUID) async throws -> RuntimeStatus {
+        throw RuntimeManagerError.missingSSHReference
+    }
+
+    func status(profileId: UUID) async throws -> RuntimeStatus {
+        statusCalls += 1
+        throw RuntimeManagerError.missingSSHReference
+    }
+
+    func statusCallCount() -> Int {
+        statusCalls
     }
 }
 

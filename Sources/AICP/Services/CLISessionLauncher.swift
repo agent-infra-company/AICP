@@ -31,11 +31,20 @@ actor CLISessionLauncher {
     private func launchViaShellScript(binary: String, prompt: String, cwd: String) throws {
         // Use `exec` so the CLI replaces the shell — the terminal stays open
         // as long as the interactive session is running.
+        // When a prompt is provided, pass it directly to the CLI so the agent
+        // starts working immediately without the user needing to paste.
+        let execLine: String
+        if prompt.isEmpty {
+            execLine = "exec \(bashQuote(binary))"
+        } else {
+            execLine = "exec \(bashQuote(binary)) \(bashQuote(prompt))"
+        }
+
         let scriptContent = """
             #!/bin/bash
             clear
             cd \(bashQuote(cwd))
-            exec \(bashQuote(binary))
+            \(execLine)
             """
 
         let tempDir = FileManager.default.temporaryDirectory
@@ -47,13 +56,6 @@ actor CLISessionLauncher {
             [.posixPermissions: 0o755],
             ofItemAtPath: scriptURL.path
         )
-
-        // Copy the prompt to the pasteboard so the user can paste it
-        if !prompt.isEmpty {
-            let pasteboard = NSPasteboard.general
-            pasteboard.clearContents()
-            pasteboard.setString(prompt, forType: .string)
-        }
 
         Self.log.info("Opening terminal script at \(scriptURL.path, privacy: .public)")
 
