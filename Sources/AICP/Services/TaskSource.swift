@@ -36,6 +36,19 @@ enum TaskSourceKind: String, Codable, CaseIterable, Identifiable, Hashable {
         }
     }
 
+    /// Resource image name for the app icon PNG, if available.
+    var iconImageName: String? {
+        switch self {
+        case .conductor: "icon_conductor"
+        case .claudeCode: "icon_claude_code"
+        case .codex: "icon_codex"
+        case .claudeDesktop: "icon_claude"
+        case .cursor: "icon_cursor"
+        case .openClaw: nil
+        case .webAIChat: nil
+        }
+    }
+
     var iconColor: String {
         switch self {
         case .openClaw: "blue"

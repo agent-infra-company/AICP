@@ -962,10 +962,20 @@ private struct UnifiedTaskRow: View {
         HStack(spacing: 6) {
             SnakeGrid(mode: gridMode)
 
-            Image(systemName: task.sourceKind.iconName)
-                .font(.system(size: 10, weight: .medium))
-                .foregroundStyle(sourceColor.opacity(0.8))
-                .frame(width: 14)
+            Group {
+                if let imageName = task.sourceKind.iconImageName,
+                   let nsImage = NSImage(named: imageName) ?? Bundle.module.image(forResource: imageName) {
+                    Image(nsImage: nsImage)
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .clipShape(RoundedRectangle(cornerRadius: 3))
+                } else {
+                    Image(systemName: task.sourceKind.iconName)
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(sourceColor.opacity(0.8))
+                }
+            }
+            .frame(width: 14, height: 14)
 
             if let workspace = task.workspace {
                 Text(workspace)
