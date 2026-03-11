@@ -6,6 +6,12 @@ A macOS notch companion for AI task coordination.
 
 AICP lives near your MacBook's notch and acts as a lightweight command center for AI workflows. Send prompts, monitor running tasks, respond to follow-up questions, and track history — all without leaving your current context.
 
+## Current State & Vision
+
+Today, AICP relies on a number of workarounds to discover, retrieve, and review tasks across different AI coding platforms (Claude Code, Codex CLI, Cursor, etc.). Each platform exposes different interfaces—or none at all—so the integration layer is largely built on heuristics, polling, and screen-scraping rather than clean APIs.
+
+Over time, we'd like to propose **a standard protocol for AI control planes across platforms**. The goal is a shared, open specification that any AI coding tool can implement, enabling a unified surface for task submission, status streaming, follow-up handling, and history—without per-platform workarounds. If you're interested in collaborating on this, open an issue or reach out.
+
 ## Features
 
 - **Notch-native UI** — Expands from the macOS notch area with collapsed and expanded layouts
@@ -28,13 +34,13 @@ AICP lives near your MacBook's notch and acts as a lightweight command center fo
 
 ### Download
 
-Download the latest `.dmg` or `.zip` from [Releases](https://github.com/apupneja/clawy/releases), then drag `AICP.app` to `/Applications`.
+Download the latest `.dmg` or `.zip` from [Releases](https://github.com/agent-infra-company/AICP/releases), then drag `AICP.app` to `/Applications`.
 
-### Quick Install 
+### Quick Install
 
 ```bash
-git clone https://github.com/apupneja/clawy.git
-cd clawy
+git clone https://github.com/agent-infra-company/AICP.git
+cd AICP
 make install
 ```
 
@@ -43,8 +49,8 @@ This builds a release `.app` bundle and copies it to `/Applications`. Launch fro
 ### Building from Source
 
 ```bash
-git clone https://github.com/apupneja/clawy.git
-cd clawy
+git clone https://github.com/agent-infra-company/AICP.git
+cd AICP
 
 # Build and run the .app bundle
 make app
@@ -89,6 +95,7 @@ Access settings from the menu bar icon. Configuration options include:
 - **Command Templates** — Customizable runtime lifecycle commands (start, stop, restart, status) with safe placeholder substitution
 - **About** — Version info, feedback links, diagnostics export
 
+
 ## Architecture
 
 The app follows a layered architecture:
@@ -108,7 +115,7 @@ See [`docs/`](docs/) for detailed product vision, UX documentation, technical ar
 ## Contributing
 
 Contributions are welcome. Please open an issue to discuss proposed changes before submitting a pull request:
-<https://github.com/apupneja/clawy/issues>
+<https://github.com/agent-infra-company/AICP/issues>
 
 ## License
 
