@@ -26,7 +26,11 @@ AICP lives near your MacBook's notch and acts as a lightweight command center fo
 
 ## Installation
 
-### Quick Install (recommended)
+### Download
+
+Download the latest `.dmg` or `.zip` from [Releases](https://github.com/apupneja/clawy/releases), then drag `AICP.app` to `/Applications`.
+
+### Quick Install 
 
 ```bash
 git clone https://github.com/apupneja/clawy.git
@@ -35,10 +39,6 @@ make install
 ```
 
 This builds a release `.app` bundle and copies it to `/Applications`. Launch from Spotlight or `/Applications/AICP.app`.
-
-### Download
-
-Download the latest `.dmg` or `.zip` from [Releases](https://github.com/apupneja/clawy/releases), then drag `AICP.app` to `/Applications`.
 
 ### Building from Source
 
