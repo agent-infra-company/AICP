@@ -5,27 +5,22 @@ struct OnboardingProgressBar: View {
     let total: Int
 
     var body: some View {
-        GeometryReader { geo in
-            ZStack(alignment: .leading) {
+        HStack(spacing: 6) {
+            ForEach(0..<total, id: \.self) { index in
                 Capsule()
-                    .fill(Color.white.opacity(0.1))
-                    .frame(height: 4)
-                Capsule()
-                    .fill(Color.red)
-                    .frame(
-                        width: geo.size.width * CGFloat(current + 1) / CGFloat(total),
-                        height: 4
-                    )
+                    .fill(index <= current ? Color.red : Color.white.opacity(0.1))
+                    .frame(height: 3)
+                    .frame(maxWidth: .infinity)
                     .animation(.spring(response: 0.4), value: current)
             }
         }
-        .frame(height: 4)
     }
 }
 
 struct OnboardingNavBar: View {
     let currentStep: Int
     let totalSteps: Int
+    var hideNextButton: Bool = false
     let onBack: () -> Void
     let onNext: () -> Void
     let onFinish: () -> Void
@@ -35,19 +30,26 @@ struct OnboardingNavBar: View {
             if currentStep > 0 {
                 Button("Back") { onBack() }
                     .buttonStyle(.plain)
-                    .foregroundStyle(.white.opacity(0.6))
+                    .foregroundStyle(.white.opacity(0.5))
+                    .font(.system(size: 13))
             }
 
             Spacer()
 
             if currentStep < totalSteps - 1 {
-                Button("Continue") { onNext() }
-                    .buttonStyle(.borderedProminent)
-                    .tint(.red)
+                if !hideNextButton {
+                    Button("Continue") { onNext() }
+                        .buttonStyle(.borderedProminent)
+                        .tint(.red)
+                        .controlSize(.regular)
+                }
             } else {
-                Button("Start Using AICP") { onFinish() }
-                    .buttonStyle(.borderedProminent)
-                    .tint(.red)
+                Button("Get Started") {
+                    DispatchQueue.main.async { onFinish() }
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.red)
+                .controlSize(.regular)
             }
         }
     }

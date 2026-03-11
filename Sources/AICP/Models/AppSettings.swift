@@ -20,6 +20,7 @@ struct AppSettings: Codable, Hashable {
     var glowColorHex: String
     var notchStyle: NotchStyle
     var selectedCLI: String?
+    var openClawEnabled: Bool
 
     static var `default`: AppSettings {
         AppSettings(
@@ -34,7 +35,8 @@ struct AppSettings: Codable, Hashable {
             hasCompletedOnboarding: false,
             glowColorHex: "#FF0000",
             notchStyle: .glow,
-            selectedCLI: nil
+            selectedCLI: nil,
+            openClawEnabled: false
         )
     }
 
@@ -50,7 +52,8 @@ struct AppSettings: Codable, Hashable {
         hasCompletedOnboarding: Bool = false,
         glowColorHex: String = "#FF0000",
         notchStyle: NotchStyle = .glow,
-        selectedCLI: String? = nil
+        selectedCLI: String? = nil,
+        openClawEnabled: Bool = false
     ) {
         self.launchAtLogin = launchAtLogin
         self.showInFullscreen = showInFullscreen
@@ -64,6 +67,7 @@ struct AppSettings: Codable, Hashable {
         self.glowColorHex = glowColorHex
         self.notchStyle = notchStyle
         self.selectedCLI = selectedCLI
+        self.openClawEnabled = openClawEnabled
     }
 
     init(from decoder: Decoder) throws {
@@ -80,6 +84,7 @@ struct AppSettings: Codable, Hashable {
         glowColorHex = try container.decodeIfPresent(String.self, forKey: .glowColorHex) ?? "#FF0000"
         notchStyle = try container.decodeIfPresent(NotchStyle.self, forKey: .notchStyle) ?? .glow
         selectedCLI = try container.decodeIfPresent(String.self, forKey: .selectedCLI)
+        openClawEnabled = try container.decodeIfPresent(Bool.self, forKey: .openClawEnabled) ?? false
     }
 }
 
@@ -94,8 +99,24 @@ struct PersistedState: Codable {
 
     static func bootstrap() -> PersistedState {
         let localTemplates = CommandTemplateSet.localDefault
+        let settings = AppSettings.default
+
+        return PersistedState(
+            profiles: [],
+            commandTemplateSets: [localTemplates],
+            tasks: [],
+            routeAliasesByProfile: [:],
+            settings: settings,
+            updatedAt: Date(),
+            archivedTaskIds: []
+        )
+    }
+
+    static func bootstrapWithOpenClaw() -> PersistedState {
+        let localTemplates = CommandTemplateSet.localDefault
         let localProfile = ProfileConfig.defaultLocal(commandTemplateSetId: localTemplates.id)
         var settings = AppSettings.default
+        settings.openClawEnabled = true
         settings.selectedProfileId = localProfile.id
         settings.selectedRouteByProfile[localProfile.id] = "default"
 

@@ -3,9 +3,9 @@ import XCTest
 @testable import AICP
 
 @MainActor
-final class CompanionCoreSubmissionTests: XCTestCase {
+final class ControlPlaneCoreSubmissionTests: XCTestCase {
     func testSubmitPromptRekeysTaskWhenGatewayReturnsCanonicalTaskID() async throws {
-        let persistenceStore = StubPersistenceStore(state: PersistedState.bootstrap())
+        let persistenceStore = StubPersistenceStore(state: PersistedState.bootstrapWithOpenClaw())
         let gatewayClient = StubGatewayClient(
             sendTaskResponses: [
                 .success(
@@ -41,7 +41,7 @@ final class CompanionCoreSubmissionTests: XCTestCase {
     }
 
     func testRetryPathRekeysTaskWhenRetryReceivesCanonicalTaskID() async throws {
-        let persistenceStore = StubPersistenceStore(state: PersistedState.bootstrap())
+        let persistenceStore = StubPersistenceStore(state: PersistedState.bootstrapWithOpenClaw())
         let gatewayClient = StubGatewayClient(
             sendTaskResponses: [
                 .failure(StubError.syntheticFailure),
@@ -76,7 +76,7 @@ final class CompanionCoreSubmissionTests: XCTestCase {
     }
 
     func testModernGatewayEventsUpdateTaskWithoutLegacyTaskIdentifier() async throws {
-        let persistenceStore = StubPersistenceStore(state: PersistedState.bootstrap())
+        let persistenceStore = StubPersistenceStore(state: PersistedState.bootstrapWithOpenClaw())
         let gatewayClient = StubGatewayClient(
             sendTaskResponses: [
                 .success(
@@ -113,7 +113,7 @@ final class CompanionCoreSubmissionTests: XCTestCase {
                 ]
             )
         )
-        await Task.yield()
+        try? await Task.sleep(for: .milliseconds(20))
 
         XCTAssertEqual(core.tasks.first?.status, .running)
         XCTAssertEqual(core.tasks.first?.latestProgress, "Agent started")
@@ -131,7 +131,7 @@ final class CompanionCoreSubmissionTests: XCTestCase {
                 ]
             )
         )
-        await Task.yield()
+        try? await Task.sleep(for: .milliseconds(20))
 
         XCTAssertEqual(core.tasks.first?.status, .completed)
         XCTAssertEqual(core.tasks.first?.runId, "run-42")
@@ -139,7 +139,7 @@ final class CompanionCoreSubmissionTests: XCTestCase {
     }
 
     func testApprovalEventMovesTaskToNeedsInputUsingSessionKeyCorrelation() async throws {
-        let persistenceStore = StubPersistenceStore(state: PersistedState.bootstrap())
+        let persistenceStore = StubPersistenceStore(state: PersistedState.bootstrapWithOpenClaw())
         let gatewayClient = StubGatewayClient(
             sendTaskResponses: [
                 .success(
@@ -185,7 +185,7 @@ final class CompanionCoreSubmissionTests: XCTestCase {
     }
 
     func testCollapseIsAllowedWhileSubmitting() async throws {
-        let persistenceStore = StubPersistenceStore(state: PersistedState.bootstrap())
+        let persistenceStore = StubPersistenceStore(state: PersistedState.bootstrapWithOpenClaw())
         let gatewayClient = StubGatewayClient(sendTaskResponses: [])
         let core = makeCore(
             gatewayClient: gatewayClient,
@@ -202,7 +202,7 @@ final class CompanionCoreSubmissionTests: XCTestCase {
     }
 
     func testSubmitPromptSkipsRuntimeSSHCheckForRemoteWithoutSSHReference() async throws {
-        let persistenceStore = StubPersistenceStore(state: PersistedState.bootstrap())
+        let persistenceStore = StubPersistenceStore(state: PersistedState.bootstrapWithOpenClaw())
         let gatewayClient = StubGatewayClient(
             sendTaskResponses: [
                 .success(
@@ -247,8 +247,8 @@ final class CompanionCoreSubmissionTests: XCTestCase {
         gatewayClient: GatewayClient,
         persistenceStore: PersistenceStore,
         runtimeManager: RuntimeManager = StubRuntimeManager()
-    ) -> CompanionCore {
-        CompanionCore(
+    ) -> ControlPlaneCore {
+        ControlPlaneCore(
             gatewayClient: gatewayClient,
             runtimeManager: runtimeManager,
             persistenceStore: persistenceStore,

@@ -6,7 +6,7 @@ protocol DiagnosticsExporting: Sendable {
 }
 
 actor DiagnosticsExporter: DiagnosticsExporting {
-    private static let log = CompanionDiagnostics.logger(category: "DiagnosticsExporter")
+    private static let log = ControlPlaneDiagnostics.logger(category: "DiagnosticsExporter")
 
     func exportDiagnostics() async throws -> URL {
         let fm = FileManager.default

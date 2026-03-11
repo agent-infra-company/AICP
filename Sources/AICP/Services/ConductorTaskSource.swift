@@ -5,7 +5,7 @@ import os.log
 final class ConductorTaskSource: TaskSource, @unchecked Sendable {
     let sourceKind: TaskSourceKind = .conductor
 
-    private static let log = CompanionDiagnostics.logger(category: "ConductorTaskSource")
+    private static let log = ControlPlaneDiagnostics.logger(category: "ConductorTaskSource")
 
     private let dbPath: String
     private let pollInterval: TimeInterval

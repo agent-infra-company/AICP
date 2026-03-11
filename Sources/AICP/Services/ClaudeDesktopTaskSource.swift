@@ -5,7 +5,7 @@ import os.log
 final class ClaudeDesktopTaskSource: TaskSource, @unchecked Sendable {
     let sourceKind: TaskSourceKind = .claudeDesktop
 
-    private static let log = CompanionDiagnostics.logger(category: "ClaudeDesktopTaskSource")
+    private static let log = ControlPlaneDiagnostics.logger(category: "ClaudeDesktopTaskSource")
 
     private let bundleIdentifier = "com.anthropic.claudefordesktop"
     private let pollInterval: TimeInterval
@@ -74,10 +74,7 @@ final class ClaudeDesktopTaskSource: TaskSource, @unchecked Sendable {
         )
 
         if sessions.isEmpty {
-            if isDesktopRunning {
-                Self.log.debug("Using Claude Desktop fallback snapshot because no recent local sessions were found")
-            }
-            return isDesktopRunning ? fallbackSnapshot() : []
+            return []
         }
 
         return sessions.map { session in
@@ -108,23 +105,5 @@ final class ClaudeDesktopTaskSource: TaskSource, @unchecked Sendable {
                 metadata: metadata
             )
         }
-    }
-
-    private func fallbackSnapshot() -> [ExternalTaskSnapshot] {
-        return [
-            ExternalTaskSnapshot(
-                id: "claude-desktop",
-                sourceKind: .claudeDesktop,
-                title: "Claude Desktop",
-                workspace: nil,
-                status: .running,
-                progress: "Active",
-                needsInputPrompt: nil,
-                lastError: nil,
-                updatedAt: Date(),
-                deepLinkURL: URL(string: "claude://"),
-                metadata: [:]
-            )
-        ]
     }
 }

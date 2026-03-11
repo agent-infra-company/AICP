@@ -2,7 +2,7 @@ import XCTest
 @testable import AICP
 
 final class ExternalSnapshotActivityDetectorTests: XCTestCase {
-    func testNewSnapshotAlwaysAnnounces() {
+    func testNewNonCursorSnapshotAlwaysAnnounces() {
         let snapshot = makeSnapshot(
             id: "codex-thread",
             sourceKind: .codex,
@@ -13,6 +13,155 @@ final class ExternalSnapshotActivityDetectorTests: XCTestCase {
 
         XCTAssertTrue(ExternalSnapshotActivityDetector.shouldAnnounce(old: nil, new: snapshot))
     }
+
+    // MARK: - Cursor-specific tests
+
+    func testNewCursorChatOnlyDoesNotAnnounce() {
+        let snapshot = makeSnapshot(
+            id: "my-project",
+            sourceKind: .cursor,
+            status: .running,
+            updatedAt: Date(),
+            metadata: ["roles": "user"]
+        )
+
+        XCTAssertFalse(ExternalSnapshotActivityDetector.shouldAnnounce(old: nil, new: snapshot))
+    }
+
+    func testNewCursorAgentSessionAnnounces() {
+        let snapshot = makeSnapshot(
+            id: "my-project",
+            sourceKind: .cursor,
+            status: .running,
+            updatedAt: Date(),
+            metadata: ["roles": "agent-exec,user"]
+        )
+
+        XCTAssertTrue(ExternalSnapshotActivityDetector.shouldAnnounce(old: nil, new: snapshot))
+    }
+
+    func testCursorAgentStartsAnnounces() {
+        let old = makeSnapshot(
+            id: "my-project",
+            sourceKind: .cursor,
+            status: .running,
+            updatedAt: Date(timeIntervalSince1970: 100),
+            metadata: ["roles": "user"]
+        )
+        let new = makeSnapshot(
+            id: "my-project",
+            sourceKind: .cursor,
+            status: .running,
+            updatedAt: Date(timeIntervalSince1970: 105),
+            metadata: ["roles": "agent-exec,user"]
+        )
+
+        XCTAssertTrue(ExternalSnapshotActivityDetector.shouldAnnounce(old: old, new: new))
+    }
+
+    func testCursorAgentCompletesAnnounces() {
+        let old = makeSnapshot(
+            id: "my-project",
+            sourceKind: .cursor,
+            status: .running,
+            updatedAt: Date(timeIntervalSince1970: 100),
+            metadata: ["roles": "agent-exec,user"]
+        )
+        let new = makeSnapshot(
+            id: "my-project",
+            sourceKind: .cursor,
+            status: .running,
+            updatedAt: Date(timeIntervalSince1970: 105),
+            metadata: ["roles": "user"]
+        )
+
+        XCTAssertTrue(ExternalSnapshotActivityDetector.shouldAnnounce(old: old, new: new))
+    }
+
+    func testCursorSameRolesDoNotAnnounce() {
+        let old = makeSnapshot(
+            id: "my-project",
+            sourceKind: .cursor,
+            status: .running,
+            updatedAt: Date(timeIntervalSince1970: 100),
+            metadata: ["roles": "user"]
+        )
+        let new = makeSnapshot(
+            id: "my-project",
+            sourceKind: .cursor,
+            status: .running,
+            updatedAt: Date(timeIntervalSince1970: 105),
+            metadata: ["roles": "user"]
+        )
+
+        XCTAssertFalse(ExternalSnapshotActivityDetector.shouldAnnounce(old: old, new: new))
+    }
+
+    // MARK: - Conductor-specific tests
+
+    func testNewConductorIdleSessionDoesNotAnnounce() {
+        let snapshot = makeSnapshot(
+            id: "session-1",
+            sourceKind: .conductor,
+            status: .completed,
+            updatedAt: Date(),
+            metadata: [:]
+        )
+
+        XCTAssertFalse(ExternalSnapshotActivityDetector.shouldAnnounce(old: nil, new: snapshot))
+    }
+
+    func testNewConductorWorkingSessionAnnounces() {
+        let snapshot = makeSnapshot(
+            id: "session-1",
+            sourceKind: .conductor,
+            status: .running,
+            updatedAt: Date(),
+            metadata: [:]
+        )
+
+        XCTAssertTrue(ExternalSnapshotActivityDetector.shouldAnnounce(old: nil, new: snapshot))
+    }
+
+    func testConductorStatusChangeAnnounces() {
+        let old = makeSnapshot(
+            id: "session-1",
+            sourceKind: .conductor,
+            status: .running,
+            updatedAt: Date(timeIntervalSince1970: 100),
+            metadata: [:]
+        )
+        let new = makeSnapshot(
+            id: "session-1",
+            sourceKind: .conductor,
+            status: .completed,
+            updatedAt: Date(timeIntervalSince1970: 105),
+            metadata: [:]
+        )
+
+        XCTAssertTrue(ExternalSnapshotActivityDetector.shouldAnnounce(old: old, new: new))
+    }
+
+    func testConductorSameStatusDoesNotAnnounce() {
+        let old = makeSnapshot(
+            id: "session-1",
+            sourceKind: .conductor,
+            status: .running,
+            updatedAt: Date(timeIntervalSince1970: 100),
+            metadata: [:]
+        )
+        let new = makeSnapshot(
+            id: "session-1",
+            sourceKind: .conductor,
+            status: .running,
+            updatedAt: Date(timeIntervalSince1970: 105),
+            metadata: [:]
+        )
+
+        XCTAssertFalse(ExternalSnapshotActivityDetector.shouldAnnounce(old: old, new: new))
+    }
+
+    // MARK: - General tests
 
     func testNeedsInputTurnAdvancementAnnounces() {
         let old = makeSnapshot(

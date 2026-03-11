@@ -1,7 +1,7 @@
 import Foundation
 import os.log
 
-enum CompanionDiagnostics {
+enum ControlPlaneDiagnostics {
     static let subsystem = "com.aicp.app"
 
     static func logger(category: String) -> Logger {
@@ -29,7 +29,7 @@ enum ProcessProbe {
             try process.run()
         } catch {
             logger.error(
-                "\(label, privacy: .public) launch failed path=\(path, privacy: .public) arguments=\(CompanionDiagnostics.joined(arguments), privacy: .public) error=\(error.localizedDescription, privacy: .public)"
+                "\(label, privacy: .public) launch failed path=\(path, privacy: .public) arguments=\(ControlPlaneDiagnostics.joined(arguments), privacy: .public) error=\(error.localizedDescription, privacy: .public)"
             )
             return nil
         }
@@ -54,14 +54,14 @@ enum ProcessProbe {
 
         guard process.terminationStatus == 0 else {
             logger.error(
-                "\(label, privacy: .public) failed status=\(process.terminationStatus) path=\(path, privacy: .public) arguments=\(CompanionDiagnostics.joined(arguments), privacy: .public) stderr=\(stderr, privacy: .public)"
+                "\(label, privacy: .public) failed status=\(process.terminationStatus) path=\(path, privacy: .public) arguments=\(ControlPlaneDiagnostics.joined(arguments), privacy: .public) stderr=\(stderr, privacy: .public)"
             )
             return nil
         }
 
         guard let output = String(data: stdoutData, encoding: .utf8) else {
             logger.error(
-                "\(label, privacy: .public) produced non-UTF8 stdout path=\(path, privacy: .public) arguments=\(CompanionDiagnostics.joined(arguments), privacy: .public)"
+                "\(label, privacy: .public) produced non-UTF8 stdout path=\(path, privacy: .public) arguments=\(ControlPlaneDiagnostics.joined(arguments), privacy: .public)"
             )
             return nil
         }

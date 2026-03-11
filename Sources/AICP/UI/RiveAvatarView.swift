@@ -1,5 +1,5 @@
-@preconcurrency import RiveRuntime
 import SwiftUI
+@preconcurrency import RiveRuntime
 
 struct RiveAvatarView: View {
     @StateObject private var viewModel = RiveViewModel(

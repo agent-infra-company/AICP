@@ -174,7 +174,7 @@ private struct GatewayCredential {
 }
 
 actor OpenClawGatewayClient: GatewayClient {
-    private static let log = CompanionDiagnostics.logger(category: "GatewayClient")
+    private static let log = ControlPlaneDiagnostics.logger(category: "GatewayClient")
 
     private final class ConnectionBox {
         let socket: URLSessionWebSocketTask

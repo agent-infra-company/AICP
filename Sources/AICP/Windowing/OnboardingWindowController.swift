@@ -4,10 +4,10 @@ import SwiftUI
 @MainActor
 final class OnboardingWindowController {
     private var window: NSWindow?
-    private let core: CompanionCore
+    private let core: ControlPlaneCore
     private var onComplete: (() -> Void)?
 
-    init(core: CompanionCore) {
+    init(core: ControlPlaneCore) {
         self.core = core
     }
 
@@ -23,18 +23,18 @@ final class OnboardingWindowController {
         }
 
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 640, height: 480),
+            contentRect: NSRect(x: 0, y: 0, width: 480, height: 540),
             styleMask: [.titled, .closable, .fullSizeContentView],
             backing: .buffered,
             defer: false
         )
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
-        window.isMovableByWindowBackground = true
+        window.title = "Welcome to AICP"
         window.backgroundColor = .black
+        window.isReleasedWhenClosed = false
+        window.isRestorable = false
         window.contentView = NSHostingView(rootView: contentView)
-        window.appearance = NSAppearance(named: .darkAqua)
-        window.level = .floating
         window.center()
 
         self.window = window
@@ -47,10 +47,15 @@ final class OnboardingWindowController {
 
     private func dismiss() {
         core.completeOnboarding()
-        window?.close()
-        window = nil
-        // Restore menu bar app behavior for the notch panel
+        let completion = onComplete
+        onComplete = nil
+        // Keep the onboarding window alive and hidden to avoid AppKit teardown crashes
+        // during the transition into the main control-plane shell.
+        window?.orderOut(nil)
+        // Restore menu-bar-only mode so the Dock icon disappears
         NSApp.setActivationPolicy(.accessory)
-        onComplete?()
+        DispatchQueue.main.async {
+            completion?()
+        }
     }
 }

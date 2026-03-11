@@ -13,6 +13,7 @@ final class NotchPanel: NSPanel {
         )
 
         isFloatingPanel = true
+        hidesOnDeactivate = false
         isOpaque = false
         titleVisibility = .hidden
         titlebarAppearsTransparent = true

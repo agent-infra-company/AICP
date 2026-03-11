@@ -2,7 +2,7 @@ import Foundation
 import os.log
 
 actor TaskSourceAggregator {
-    private static let log = CompanionDiagnostics.logger(category: "TaskSourceAggregator")
+    private static let log = ControlPlaneDiagnostics.logger(category: "TaskSourceAggregator")
 
     private var sources: [TaskSource] = []
     private var monitorTasks: [TaskSourceKind: Task<Void, Never>] = [:]

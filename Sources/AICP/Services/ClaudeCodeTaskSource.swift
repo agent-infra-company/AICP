@@ -23,7 +23,7 @@ final class ClaudeCodeTaskSource: TaskSource, @unchecked Sendable {
         let available = !installedBinaries.isEmpty || hasStateDirectory
 
         Self.log.debug(
-            "Availability available=\(available) binaries=\(CompanionDiagnostics.joined(installedBinaries), privacy: .public) stateDirectory=\(claudeStateDirectory, privacy: .public) stateExists=\(hasStateDirectory)"
+            "Availability available=\(available) binaries=\(ControlPlaneDiagnostics.joined(installedBinaries), privacy: .public) stateDirectory=\(claudeStateDirectory, privacy: .public) stateExists=\(hasStateDirectory)"
         )
 
         return available

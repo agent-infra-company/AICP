@@ -6,13 +6,16 @@ import UserNotifications
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
-    let core: CompanionCore
+    let core: ControlPlaneCore
     private let aggregator: TaskSourceAggregator
     private let environment = AppRuntimeEnvironment.current
+    // V2 onboarding reset migration key – kept for reference but migration is complete.
+    // private static let onboardingResetFlagKey = "AICP.didResetOnboardingForV2"
 
     private var shellController: NotchShellController?
     private var onboardingController: OnboardingWindowController?
     private var unbundledDebugWindow: NSWindow?
+    private var settingsWindowController: NSWindowController?
 
     override init() {
         let secretStore = SecretStoreFactory.create(service: "com.aicp.app")
@@ -28,7 +31,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         let aggregator = TaskSourceAggregator()
         self.aggregator = aggregator
 
-        self.core = CompanionCore(
+        self.core = ControlPlaneCore(
             gatewayClient: gatewayClient,
             runtimeManager: runtimeManager,
             persistenceStore: persistenceStore,
@@ -70,8 +73,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                 onboardingController = OnboardingWindowController(core: core)
                 onboardingController?.showIfNeeded { [weak self] in
                     guard let self else { return }
-                    self.onboardingController = nil
-                    self.showNotchShell()
+                    showNotchShell()
+                    // Auto-expand so the user sees the control plane after onboarding
+                    self.core.setExpanded(true)
                 }
             } else {
                 showNotchShell()
@@ -89,14 +93,50 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     }
 
     private func showNotchShell() {
-        shellController = NotchShellController(core: core)
+        if shellController == nil {
+            shellController = NotchShellController(core: core)
+        }
         shellController?.show()
+    }
+
+    // V2 migration removed: resetOnboardingIfNeeded() was resetting hasCompletedOnboarding
+    // on every launch when the UserDefaults flag failed to persist (e.g. unbundled runs,
+    // domain changes). The migration is complete so the reset is no longer needed.
+
+    func openSettingsWindow() {
+        if let window = settingsWindowController?.window {
+            NSApp.activate(ignoringOtherApps: true)
+            window.makeKeyAndOrderFront(nil)
+            return
+        }
+
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 640, height: 440),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable],
+            backing: .buffered,
+            defer: false
+        )
+        window.title = "AICP Settings"
+        window.isReleasedWhenClosed = false
+        window.center()
+        window.setFrameAutosaveName("AICP.SettingsWindow")
+        window.contentView = NSHostingView(rootView: SettingsRootView(core: core))
+
+        let controller = NSWindowController(window: window)
+        settingsWindowController = controller
+        NSApp.activate(ignoringOtherApps: true)
+        controller.showWindow(nil)
+        window.makeKeyAndOrderFront(nil)
+    }
+
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        false
     }
 
     private func showUnbundledDebugWindow() {
         let content = VStack(spacing: 10) {
             Text("AICP is running in `swift run` mode.")
-            Text("The notch companion is loaded. Menu bar, full onboarding, and notification permissions require launching the app bundle.")
+            Text("The notch control plane is loaded. Menu bar, full onboarding, and notification permissions require launching the app bundle.")
                 .foregroundStyle(.secondary)
         }
         .padding(24)

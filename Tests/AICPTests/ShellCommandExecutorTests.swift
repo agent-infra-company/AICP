@@ -27,4 +27,69 @@ final class ShellCommandExecutorTests: XCTestCase {
         XCTAssertEqual(box.result?.exitCode, 0)
         XCTAssertTrue(box.result?.stdout.hasPrefix("1\n2\n3\n") == true)
     }
+
+    func testResolvedCommandUsesAbsolutePathFromEnvironmentOverride() throws {
+        let executableURL = try makeExecutable(named: "openclaw")
+        defer { try? FileManager.default.removeItem(at: executableURL.deletingLastPathComponent()) }
+
+        let resolved = ShellCommandExecutor.resolvedCommand(
+            "openclaw gateway status",
+            environment: ["OPENCLAW_BIN": executableURL.path]
+        )
+
+        XCTAssertEqual(resolved, "\(executableURL.path) gateway status")
+    }
+
+    func testResolvedCommandFallsBackToLaunchAgentExecutablePath() throws {
+        let executableURL = try makeExecutable(named: "openclaw")
+        let plistURL = executableURL.deletingLastPathComponent().appendingPathComponent("ai.openclaw.gateway.plist")
+        defer { try? FileManager.default.removeItem(at: executableURL.deletingLastPathComponent()) }
+
+        let plist: [String: Any] = [
+            "ProgramArguments": [
+                executableURL.path,
+                "gateway",
+                "start",
+            ],
+        ]
+        let data = try PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0)
+        try data.write(to: plistURL, options: .atomic)
+
+        let resolved = ShellCommandExecutor.resolvedCommand(
+            "openclaw gateway start --port 4689",
+            environment: ["PATH": "/usr/bin:/bin"],
+            launchAgentSearchPaths: [plistURL],
+            executableSearchPaths: []
+        )
+
+        XCTAssertEqual(resolved, "\(executableURL.path) gateway start --port 4689")
+    }
+
+    func testResolvedCommandLeavesCommandUntouchedWhenExecutableCannotBeFound() {
+        let command = "openclaw gateway status"
+
+        let resolved = ShellCommandExecutor.resolvedCommand(
+            command,
+            environment: ["PATH": "/usr/bin:/bin"],
+            launchAgentSearchPaths: [],
+            executableSearchPaths: []
+        )
+
+        XCTAssertEqual(resolved, command)
+    }
+
+    private func makeExecutable(named name: String) throws -> URL {
+        let directoryURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)
+
+        let executableURL = directoryURL.appendingPathComponent(name)
+        try Data("#!/bin/sh\nexit 0\n".utf8).write(to: executableURL, options: .atomic)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: NSNumber(value: Int16(0o755))],
+            ofItemAtPath: executableURL.path
+        )
+
+        return executableURL
+    }
 }

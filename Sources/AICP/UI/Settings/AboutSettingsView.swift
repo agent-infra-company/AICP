@@ -5,103 +5,118 @@ struct AboutSettingsView: View {
     @ObservedObject var updateManager: UpdateManager
     @State private var isExporting = false
     @State private var exportError: String?
+    @State private var showBuildNumber = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 24) {
-            Text("About")
-                .font(.title2.weight(.semibold))
+        Form {
+            Section {
+                VStack(spacing: 10) {
+                    appIcon
+                        .frame(width: 64, height: 64)
 
-            GroupBox {
-                VStack(spacing: 20) {
-                    Image(systemName: "capsule.tophalf.filled")
-                        .font(.system(size: 48))
-                        .foregroundStyle(.red)
+                    Text("AICP")
+                        .font(.title3.weight(.bold))
 
-                    Text("AICP - AI Control Plane")
-                        .font(.title3.weight(.semibold))
-
-                    Text("Version \(appVersion)")
-                        .font(.body)
+                    Text("AI Control Plane")
+                        .font(.callout)
                         .foregroundStyle(.secondary)
-
-                    Text("A macOS notch companion for OpenClaw-powered\nAI task coordination.")
-                        .font(.body)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
                 }
-                .padding(20)
                 .frame(maxWidth: .infinity)
+                .padding(.vertical, 4)
             }
 
-            GroupBox("Feedback") {
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("Help improve AICP by reporting bugs or suggesting features.")
-                        .font(.system(size: 13))
+            Section("Version") {
+                HStack {
+                    Text("Version")
+                    Spacer()
+                    Text(appVersion)
                         .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
+                .contentShape(Rectangle())
+                .onTapGesture { showBuildNumber.toggle() }
 
-                    HStack(spacing: 12) {
-                        Button {
-                            if let url = URL(string: "mailto:humans@conductor.build?subject=AICP%20Bug%20Report") {
-                                NSWorkspace.shared.open(url)
-                            }
-                        } label: {
-                            Label("Report an Issue", systemImage: "exclamationmark.bubble")
-                        }
-
-                        Button {
-                            if let url = URL(string: "mailto:humans@conductor.build?subject=AICP%20Feedback") {
-                                NSWorkspace.shared.open(url)
-                            }
-                        } label: {
-                            Label("Email Support", systemImage: "envelope")
-                        }
+                if showBuildNumber, let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String {
+                    HStack {
+                        Text("Build")
+                        Spacer()
+                        Text(build)
+                            .foregroundStyle(.secondary)
+                            .monospacedDigit()
                     }
                 }
-                .padding(8)
             }
 
-            GroupBox("Diagnostics") {
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("Export telemetry log and system info for troubleshooting.")
-                        .font(.system(size: 13))
-                        .foregroundStyle(.secondary)
-
-                    HStack(spacing: 12) {
-                        Button {
-                            exportDiagnostics()
-                        } label: {
-                            Label("Export Diagnostics\u{2026}", systemImage: "square.and.arrow.up")
-                        }
-                        .disabled(isExporting)
-
-                        if isExporting {
-                            ProgressView()
-                                .controlSize(.small)
-                        }
+            Section("Support") {
+                Button {
+                    if let url = URL(string: "mailto:anirudh.pupneja@redapto.com?subject=AICP%20Bug%20Report") {
+                        NSWorkspace.shared.open(url)
                     }
-
-                    if let exportError {
-                        Text(exportError)
-                            .font(.system(size: 12))
-                            .foregroundStyle(.red)
-                    }
+                } label: {
+                    Label("Report an Issue", systemImage: "exclamationmark.bubble")
                 }
-                .padding(8)
+
+                Button {
+                    if let url = URL(string: "mailto:anirudh.pupneja@redapto.com?subject=AICP%20Feedback") {
+                        NSWorkspace.shared.open(url)
+                    }
+                } label: {
+                    Label("Send Feedback", systemImage: "envelope")
+                }
             }
 
-            GroupBox("Updates") {
-                VStack(alignment: .leading, spacing: 12) {
+            Section("Diagnostics") {
+                HStack {
                     Button {
-                        updateManager.checkForUpdates()
+                        exportDiagnostics()
                     } label: {
-                        Label("Check for Updates\u{2026}", systemImage: "arrow.triangle.2.circlepath")
+                        Label("Export Diagnostics\u{2026}", systemImage: "square.and.arrow.up")
                     }
-                    .disabled(!updateManager.canCheckForUpdates)
-                    .help(updateManager.canCheckForUpdates ? "Check for available updates" : "Update feed not configured. Set SUFeedURL in Info.plist.")
+                    .disabled(isExporting)
+
+                    if isExporting {
+                        ProgressView()
+                            .controlSize(.small)
+                    }
                 }
-                .padding(8)
+
+                if let exportError {
+                    Text(exportError).font(.caption).foregroundStyle(.red)
+                }
+            }
+
+            Section("Updates") {
+                Button {
+                    updateManager.checkForUpdates()
+                } label: {
+                    Label("Check for Updates\u{2026}", systemImage: "arrow.triangle.2.circlepath")
+                }
+                .disabled(!updateManager.canCheckForUpdates)
+                .help(updateManager.canCheckForUpdates ? "Check for updates" : "No update feed configured.")
             }
         }
+        .formStyle(.grouped)
+        .navigationTitle("About")
+    }
+
+    private var appIcon: some View {
+        Group {
+            if let url = Bundle.main.url(forResource: "AppIcon", withExtension: "png"),
+               let nsImage = NSImage(contentsOf: url) {
+                Image(nsImage: nsImage)
+                    .resizable()
+                    .interpolation(.high)
+            } else if let image = Bundle.main.image(forResource: NSImage.Name("AppIcon")) {
+                Image(nsImage: image)
+                    .resizable()
+                    .interpolation(.high)
+            } else {
+                Image(nsImage: NSApp.applicationIconImage)
+                    .resizable()
+                    .interpolation(.high)
+            }
+        }
+        .aspectRatio(contentMode: .fit)
     }
 
     private var appVersion: String {
@@ -127,7 +142,6 @@ struct AboutSettingsView: View {
                         try? FileManager.default.copyItem(at: zipURL, to: destination)
                     }
 
-                    // Clean up the temp zip
                     try? FileManager.default.removeItem(at: zipURL)
                     isExporting = false
                 }

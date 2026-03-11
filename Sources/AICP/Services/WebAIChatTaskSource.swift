@@ -175,7 +175,7 @@ struct BrowserTab {
 final class WebAIChatTaskSource: TaskSource, @unchecked Sendable {
     let sourceKind: TaskSourceKind = .webAIChat
 
-    private static let log = CompanionDiagnostics.logger(category: "WebAIChatTaskSource")
+    private static let log = ControlPlaneDiagnostics.logger(category: "WebAIChatTaskSource")
 
     private let pollInterval: TimeInterval
     private var isRunning = false

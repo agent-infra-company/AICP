@@ -49,7 +49,7 @@ struct ProfileConfig: Identifiable, Codable, Hashable {
     static func defaultLocal(commandTemplateSetId: UUID) -> ProfileConfig {
         ProfileConfig(
             id: UUID(),
-            name: "Local OpenClaw",
+            name: "Local Gateway",
             kind: .local,
             gatewayURL: URL(string: "http://127.0.0.1:18789")!,
             authMode: .none,

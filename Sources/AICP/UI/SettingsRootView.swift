@@ -3,7 +3,7 @@ import SwiftUI
 enum SettingsCategory: String, CaseIterable, Identifiable {
     case general = "General"
     case appearance = "Appearance"
-    case profiles = "Profiles"
+    case profiles = "Gateways"
     case commandTemplates = "Command Templates"
     case about = "About"
 
@@ -11,9 +11,9 @@ enum SettingsCategory: String, CaseIterable, Identifiable {
 
     var iconName: String {
         switch self {
-        case .general: return "gearshape"
-        case .appearance: return "paintbrush"
-        case .profiles: return "person.2"
+        case .general: return "gear"
+        case .appearance: return "eye"
+        case .profiles: return "server.rack"
         case .commandTemplates: return "terminal"
         case .about: return "info.circle"
         }
@@ -21,27 +21,54 @@ enum SettingsCategory: String, CaseIterable, Identifiable {
 }
 
 struct SettingsRootView: View {
-    @ObservedObject var core: CompanionCore
+    @ObservedObject var core: ControlPlaneCore
     @StateObject private var updateManager = UpdateManager()
 
-    @State private var selectedCategory: SettingsCategory = .general
+    @State private var selectedTab: String = "General"
 
     var body: some View {
         NavigationSplitView {
-            List(SettingsCategory.allCases, selection: $selectedCategory) { category in
-                Label(category.rawValue, systemImage: category.iconName)
-                    .tag(category)
+            List(selection: $selectedTab) {
+                NavigationLink(value: "General") {
+                    Label("General", systemImage: "gear")
+                }
+                NavigationLink(value: "Appearance") {
+                    Label("Appearance", systemImage: "eye")
+                }
+                NavigationLink(value: "Gateways") {
+                    Label("Gateways", systemImage: "server.rack")
+                }
+                NavigationLink(value: "Command Templates") {
+                    Label("Command Templates", systemImage: "terminal")
+                }
+                NavigationLink(value: "About") {
+                    Label("About", systemImage: "info.circle")
+                }
             }
-            .listStyle(.sidebar)
-            .navigationSplitViewColumnWidth(min: 180, ideal: 200, max: 240)
+            .listStyle(SidebarListStyle())
+            .tint(.accentColor)
+            .toolbar(removing: .sidebarToggle)
+            .navigationSplitViewColumnWidth(180)
         } detail: {
-            ScrollView {
-                detailContent
-                    .padding(20)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+            Group {
+                switch selectedTab {
+                case "General":
+                    GeneralSettingsView(core: core)
+                case "Appearance":
+                    AppearanceSettingsView(core: core)
+                case "Gateways":
+                    ProfilesSettingsView(core: core)
+                case "Command Templates":
+                    CommandTemplatesSettingsView(core: core)
+                case "About":
+                    AboutSettingsView(updateManager: updateManager)
+                default:
+                    GeneralSettingsView(core: core)
+                }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .frame(minWidth: 760, minHeight: 560)
+        .frame(minWidth: 620, minHeight: 420)
         .alert(
             core.pendingRuntimeOperation?.title ?? "",
             isPresented: Binding(
@@ -63,20 +90,16 @@ struct SettingsRootView: View {
             Text(core.pendingRuntimeOperation?.message ?? "")
         }
     }
+}
 
-    @ViewBuilder
-    private var detailContent: some View {
-        switch selectedCategory {
-        case .general:
-            GeneralSettingsView(core: core)
-        case .appearance:
-            AppearanceSettingsView(core: core)
-        case .profiles:
-            ProfilesSettingsView(core: core)
-        case .commandTemplates:
-            CommandTemplatesSettingsView(core: core)
-        case .about:
-            AboutSettingsView(updateManager: updateManager)
-        }
-    }
+func customBadge(text: String) -> some View {
+    Text(text)
+        .font(.caption2.weight(.medium))
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 5)
+        .padding(.vertical, 1)
+        .background(
+            Capsule()
+                .fill(Color(nsColor: .secondarySystemFill))
+        )
 }

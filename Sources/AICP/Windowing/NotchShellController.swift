@@ -18,7 +18,7 @@ struct NotchGeometry {
 
 @MainActor
 final class NotchShellController {
-    private let core: CompanionCore
+    private let core: ControlPlaneCore
     private let panel: NotchPanel
 
     private var cancellables: Set<AnyCancellable> = []
@@ -33,15 +33,16 @@ final class NotchShellController {
 
     private var collapseWorkItem: DispatchWorkItem?
     private var expandWorkItem: DispatchWorkItem?
+    private var expandedAt: Date = .distantPast
 
     private static let expandedSize = CGSize(width: 800, height: 480)
 
-    init(core: CompanionCore) {
+    init(core: ControlPlaneCore) {
         self.core = core
 
         let initialFrame = NSRect(x: 0, y: 0, width: Self.expandedSize.width, height: Self.expandedSize.height)
         self.panel = NotchPanel(contentRect: initialFrame)
-        self.panel.contentView = NSHostingView(rootView: CompanionRootView(core: core))
+        self.panel.contentView = NSHostingView(rootView: ControlPlaneRootView(core: core))
         self.panel.ignoresMouseEvents = !core.isExpanded
 
         bindState()
@@ -86,6 +87,8 @@ final class NotchShellController {
                 self.panel.ignoresMouseEvents = !expanded && toast == nil
                 self.panel.orderFrontRegardless()
                 if expanded {
+                    self.expandedAt = Date()
+                    self.cancelCollapseTimer()
                     self.panel.makeKey()
                 }
             }
@@ -203,7 +206,7 @@ final class NotchShellController {
                 // Cancel any pending expand if mouse left the notch zone
                 cancelExpandTimer()
             } else {
-                let hoverRect = notchHitRect(in: screen)
+                let hoverRect = notchHoverRect(in: screen)
                 if hoverRect.contains(point) {
                     // Start expand timer — must hold for 2s
                     startExpandTimer()
@@ -237,6 +240,9 @@ final class NotchShellController {
 
     private func startCollapseTimer() {
         guard !core.isSubmitting else { return }
+        // Grace period: don't auto-collapse within 1.5s of expanding (e.g. when
+        // opened via the menu bar button while the cursor is elsewhere).
+        guard Date().timeIntervalSince(expandedAt) > 1.5 else { return }
         guard collapseWorkItem == nil else { return }
 
         let item = DispatchWorkItem { [weak self] in
@@ -324,6 +330,32 @@ final class NotchShellController {
                 y: frame.maxY - height,
                 width: width,
                 height: height
+            )
+        }
+    }
+
+    private func notchHoverRect(in screen: NSScreen) -> CGRect {
+        if let geo = notchGeometry(for: screen) {
+            // Keep hover activation constrained to the physical notch bounds so
+            // side toast-wing travel does not trigger drawer expansion.
+            let widthPadding: CGFloat = 8
+            let activationWidth = geo.notchWidth + 2 * widthPadding
+            let activationHeight = min(max(geo.notchHeight + 2, 24), 40)
+            return CGRect(
+                x: screen.frame.midX - activationWidth / 2,
+                y: screen.frame.maxY - activationHeight,
+                width: activationWidth,
+                height: activationHeight
+            )
+        } else {
+            let frame = screen.frame
+            let width = min(max(frame.width * 0.14, 180), 280)
+            let activationHeight: CGFloat = 32
+            return CGRect(
+                x: frame.midX - width / 2,
+                y: frame.maxY - activationHeight,
+                width: width,
+                height: activationHeight
             )
         }
     }

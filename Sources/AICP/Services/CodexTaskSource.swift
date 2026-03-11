@@ -6,7 +6,7 @@ import os.log
 final class CodexTaskSource: TaskSource, @unchecked Sendable {
     let sourceKind: TaskSourceKind = .codex
 
-    private static let log = CompanionDiagnostics.logger(category: "CodexTaskSource")
+    private static let log = ControlPlaneDiagnostics.logger(category: "CodexTaskSource")
 
     private let bundleIdentifier = "com.openai.codex"
     private let dbPath: String
@@ -26,7 +26,7 @@ final class CodexTaskSource: TaskSource, @unchecked Sendable {
         let available = !existingDatabases.isEmpty || isAppRunning || isInstalled
 
         Self.log.debug(
-            "Availability available=\(available) appRunning=\(isAppRunning) installed=\(isInstalled) dbPath=\(self.dbPath, privacy: .public) existingDatabases=\(CompanionDiagnostics.joined(existingDatabases), privacy: .public)"
+            "Availability available=\(available) appRunning=\(isAppRunning) installed=\(isInstalled) dbPath=\(self.dbPath, privacy: .public) existingDatabases=\(ControlPlaneDiagnostics.joined(existingDatabases), privacy: .public)"
         )
 
         return available
@@ -62,7 +62,7 @@ final class CodexTaskSource: TaskSource, @unchecked Sendable {
     private func pollDatabase() -> [ExternalTaskSnapshot] {
         guard FileManager.default.fileExists(atPath: dbPath) else {
             Self.log.warning(
-                "Primary Codex DB missing path=\(self.dbPath, privacy: .public) candidates=\(CompanionDiagnostics.joined(self.codexDatabaseCandidates()), privacy: .public)"
+                "Primary Codex DB missing path=\(self.dbPath, privacy: .public) candidates=\(ControlPlaneDiagnostics.joined(self.codexDatabaseCandidates()), privacy: .public)"
             )
             return checkPresenceFallback()
         }
@@ -83,7 +83,7 @@ final class CodexTaskSource: TaskSource, @unchecked Sendable {
             $0.bundleIdentifier == bundleIdentifier
         }
         Self.log.debug(
-            "Polling Codex DB runningWorkspaces=\(CompanionDiagnostics.joined(runningWorkspaces.sorted()), privacy: .public) desktopRunning=\(isDesktopAppRunning)"
+            "Polling Codex DB runningWorkspaces=\(ControlPlaneDiagnostics.joined(runningWorkspaces.sorted()), privacy: .public) desktopRunning=\(isDesktopAppRunning)"
         )
 
         var snapshots: [ExternalTaskSnapshot] = []
@@ -224,7 +224,7 @@ final class CodexTaskSource: TaskSource, @unchecked Sendable {
 
         if snapshots.isEmpty {
             Self.log.debug(
-                "No Codex thread snapshots were eligible runningWorkspaces=\(CompanionDiagnostics.joined(runningWorkspaces.sorted()), privacy: .public) desktopRunning=\(isDesktopAppRunning)"
+                "No Codex thread snapshots were eligible runningWorkspaces=\(ControlPlaneDiagnostics.joined(runningWorkspaces.sorted()), privacy: .public) desktopRunning=\(isDesktopAppRunning)"
             )
         }
         return snapshots

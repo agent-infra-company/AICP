@@ -11,7 +11,7 @@ enum CLISessionEvent: Sendable {
 /// The session is then picked up by the existing task source polling
 /// (ClaudeCodeTaskSource / CodexTaskSource) for status tracking.
 actor CLISessionLauncher {
-    private static let log = CompanionDiagnostics.logger(category: "CLISessionLauncher")
+    private static let log = ControlPlaneDiagnostics.logger(category: "CLISessionLauncher")
 
     /// Launch a CLI session in a new Terminal.app window (background).
     func launch(cli: TaskSourceKind, prompt: String, cwd: String) async throws {

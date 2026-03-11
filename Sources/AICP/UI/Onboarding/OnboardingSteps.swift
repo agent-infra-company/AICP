@@ -1,224 +1,248 @@
+import AppKit
 import SwiftUI
 
+enum OnboardingAssetLoader {
+    static func appIcon() -> NSImage? {
+        for bundle in [Bundle.module, Bundle.main] {
+            if let url = bundle.url(forResource: "AppIcon", withExtension: "png"),
+               let image = NSImage(contentsOf: url) {
+                return image
+            }
+
+            if let image = bundle.image(forResource: NSImage.Name("AppIcon")) {
+                return image
+            }
+        }
+
+        return nil
+    }
+}
+
+// MARK: - Welcome
+
 struct OnboardingWelcomeStep: View {
+    private let appIcon = OnboardingAssetLoader.appIcon()
+
     var body: some View {
-        VStack(spacing: 24) {
-            Image(systemName: "capsule.tophalf.filled")
-                .font(.system(size: 64))
-                .foregroundStyle(.red)
+        VStack(spacing: 20) {
+            Group {
+                if let appIcon {
+                    Image(nsImage: appIcon)
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                } else {
+                    Image(systemName: "capsule.tophalf.filled")
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .padding(16)
+                        .foregroundStyle(.red)
+                }
+            }
+            .frame(width: 80, height: 80)
 
             Text("Welcome to AICP")
-                .font(.system(size: 32, weight: .bold, design: .rounded))
+                .font(.system(size: 26, weight: .bold, design: .rounded))
                 .foregroundStyle(.white)
 
-            Text("Your macOS notch companion for AI task coordination.\nMonitor tasks, send prompts, and stay in control — all from your menu bar.")
-                .font(.system(size: 15))
-                .foregroundStyle(.white.opacity(0.7))
+            Text("Your macOS notch control plane for\nAI task coordination.")
+                .font(.system(size: 14))
+                .foregroundStyle(.white.opacity(0.6))
                 .multilineTextAlignment(.center)
-                .frame(maxWidth: 420)
-                .lineSpacing(4)
+                .lineSpacing(3)
 
-            HStack(spacing: 10) {
-                featurePill(icon: "rectangle.topthird.inset.filled", label: "Notch Companion")
-                featurePill(icon: "text.bubble", label: "AI Task Control")
-                featurePill(icon: "bell.badge", label: "Smart Notifications")
-                featurePill(icon: "terminal", label: "CLI Integration")
+            HStack(spacing: 8) {
+                featurePill(icon: "rectangle.topthird.inset.filled", label: "Notch UI")
+                featurePill(icon: "text.bubble", label: "Task Control")
+                featurePill(icon: "bell.badge", label: "Notifications")
             }
             .padding(.top, 4)
         }
     }
 
     private func featurePill(icon: String, label: String) -> some View {
-        HStack(spacing: 5) {
+        HStack(spacing: 4) {
             Image(systemName: icon)
-                .font(.system(size: 10))
+                .font(.system(size: 9))
             Text(label)
-                .font(.system(size: 11, weight: .medium))
+                .font(.system(size: 10, weight: .medium))
         }
-        .foregroundStyle(.white.opacity(0.7))
+        .foregroundStyle(.white.opacity(0.6))
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
         .background(.white.opacity(0.08), in: Capsule())
     }
 }
 
-struct OnboardingNotificationStep: View {
-    @ObservedObject var core: CompanionCore
-    @State private var granted = false
-    @State private var requested = false
-    private let environment = AppRuntimeEnvironment.current
+// MARK: - Gateway (Optional OpenClaw Setup)
 
-    private var canRequestNotifications: Bool { environment.supportsNotifications }
+struct OnboardingGatewayStep: View {
+    let onEnable: () async -> Void
+    let onSkip: () -> Void
+
+    @State private var enabling = false
 
     var body: some View {
-        VStack(spacing: 24) {
-            Image(systemName: "bell.badge.fill")
-                .font(.system(size: 56))
-                .foregroundStyle(.red)
+        VStack(spacing: 20) {
+            Image(systemName: "server.rack")
+                .font(.system(size: 44))
+                .foregroundStyle(.blue)
 
-            Text("Stay in the Loop")
-                .font(.system(size: 28, weight: .bold, design: .rounded))
+            Text("OpenClaw Gateway")
+                .font(.system(size: 24, weight: .bold, design: .rounded))
                 .foregroundStyle(.white)
 
-            Text("Get notified when tasks complete, fail, or need your input.")
-                .font(.system(size: 15))
+            Text("Connect to a local OpenClaw gateway for task routing and agent coordination.")
+                .font(.system(size: 14))
                 .foregroundStyle(.white.opacity(0.7))
                 .multilineTextAlignment(.center)
-                .frame(maxWidth: 400)
+                .frame(maxWidth: 340)
 
-            if granted {
-                Label("Notifications enabled", systemImage: "checkmark.circle.fill")
-                    .font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(.green)
-                    .transition(.scale.combined(with: .opacity))
-            } else if !canRequestNotifications {
-                Text("Notification permissions are unavailable in `swift run` mode. Launch the app bundle to enable them.")
-                    .font(.system(size: 13))
-                    .foregroundStyle(.white.opacity(0.5))
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: 400)
-            } else if !requested {
-                Button("Allow Notifications") {
+            Text("If you skip this, you can still use Claude Code, Codex, and other CLIs directly.")
+                .font(.system(size: 12))
+                .foregroundStyle(.white.opacity(0.4))
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 340)
+
+            VStack(spacing: 10) {
+                Button {
+                    enabling = true
                     Task {
-                        guard canRequestNotifications else { return }
-                        granted = await core.requestNotificationAuthorization()
-                        requested = true
+                        await onEnable()
+                        enabling = false
                     }
+                } label: {
+                    HStack {
+                        if enabling {
+                            ProgressView()
+                                .controlSize(.small)
+                                .tint(.white)
+                        }
+                        Text("Enable")
+                    }
+                    .frame(width: 180)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.blue)
+                .controlSize(.large)
+                .disabled(enabling)
+
+                Button("Skip") {
+                    onSkip()
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.white.opacity(0.4))
+                .font(.system(size: 13))
+            }
+            .padding(.top, 4)
+        }
+    }
+}
+
+// MARK: - Reusable Permission Step (boring.notch pattern)
+
+struct OnboardingPermissionStep: View {
+    let icon: String
+    let title: String
+    let description: String
+    var privacyNote: String?
+    var allowLabel: String = "Allow"
+    var skipLabel: String = "Skip"
+    let onAllow: () async -> Void
+    let onSkip: () -> Void
+
+    @State private var requesting = false
+
+    var body: some View {
+        VStack(spacing: 20) {
+            Image(systemName: icon)
+                .font(.system(size: 48))
+                .foregroundStyle(.red)
+
+            Text(title)
+                .font(.system(size: 24, weight: .bold, design: .rounded))
+                .foregroundStyle(.white)
+
+            Text(description)
+                .font(.system(size: 14))
+                .foregroundStyle(.white.opacity(0.6))
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 340)
+
+            if let privacyNote {
+                Text(privacyNote)
+                    .font(.system(size: 12))
+                    .foregroundStyle(.white.opacity(0.4))
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 340)
+            }
+
+            VStack(spacing: 10) {
+                Button {
+                    requesting = true
+                    Task {
+                        await onAllow()
+                        requesting = false
+                    }
+                } label: {
+                    HStack {
+                        if requesting {
+                            ProgressView()
+                                .controlSize(.small)
+                                .tint(.white)
+                        }
+                        Text(allowLabel)
+                    }
+                    .frame(width: 180)
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(.red)
                 .controlSize(.large)
-            } else {
-                Text("You can enable notifications later in System Settings.")
-                    .font(.system(size: 13))
-                    .foregroundStyle(.white.opacity(0.5))
+                .disabled(requesting)
+
+                Button(skipLabel) {
+                    onSkip()
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.white.opacity(0.4))
+                .font(.system(size: 13))
             }
+            .padding(.top, 4)
         }
-        .animation(.spring(response: 0.35), value: granted)
-        .animation(.spring(response: 0.35), value: requested)
     }
 }
 
-struct OnboardingProfileStep: View {
-    @ObservedObject var core: CompanionCore
-    @State private var profileName = "Local OpenClaw"
-    @State private var gatewayURL = "http://127.0.0.1:18789"
-    @State private var validationError: String?
-
-    var body: some View {
-        VStack(spacing: 24) {
-            Image(systemName: "server.rack")
-                .font(.system(size: 56))
-                .foregroundStyle(.red)
-
-            Text("Connect to OpenClaw")
-                .font(.system(size: 28, weight: .bold, design: .rounded))
-                .foregroundStyle(.white)
-
-            Text("Configure your local OpenClaw gateway connection.")
-                .font(.system(size: 15))
-                .foregroundStyle(.white.opacity(0.7))
-                .multilineTextAlignment(.center)
-
-            VStack(alignment: .leading, spacing: 14) {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Profile Name")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.5))
-                    TextField("Profile Name", text: $profileName)
-                        .textFieldStyle(.roundedBorder)
-                }
-
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Gateway URL")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.5))
-                    TextField("Gateway URL", text: $gatewayURL)
-                        .textFieldStyle(.roundedBorder)
-                        .onChange(of: gatewayURL) { _, newValue in
-                            if let url = URL(string: newValue), url.scheme != nil, url.host != nil {
-                                validationError = nil
-                            } else if !newValue.isEmpty {
-                                validationError = "Enter a valid URL (e.g. http://127.0.0.1:18789)"
-                            }
-                        }
-                }
-
-                if let validationError {
-                    Text(validationError)
-                        .font(.system(size: 11))
-                        .foregroundStyle(.red)
-                }
-            }
-            .frame(maxWidth: 400)
-        }
-        .onAppear {
-            if let existing = core.profiles.first {
-                profileName = existing.name
-                gatewayURL = existing.gatewayURL.absoluteString
-            }
-        }
-        .onDisappear {
-            saveProfile()
-        }
-    }
-
-    private func saveProfile() {
-        let trimmedName = profileName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedName.isEmpty else {
-            validationError = "Profile name cannot be empty."
-            return
-        }
-        guard let url = URL(string: gatewayURL), url.scheme != nil, url.host != nil else {
-            validationError = "Enter a valid URL (e.g. http://127.0.0.1:18789)"
-            return
-        }
-        if var existing = core.profiles.first {
-            existing.name = trimmedName
-            existing.gatewayURL = url
-            core.upsertProfile(existing)
-        } else {
-            guard let templateId = core.commandTemplateSets.first?.id else { return }
-            let profile = ProfileConfig(
-                id: UUID(), name: trimmedName, kind: .local,
-                gatewayURL: url, authMode: .none, tokenRef: nil,
-                sshRef: nil, commandTemplateSetId: templateId, enabled: true
-            )
-            core.upsertProfile(profile)
-        }
-    }
-}
+// MARK: - Completion
 
 struct OnboardingCompletionStep: View {
     var body: some View {
-        VStack(spacing: 24) {
+        VStack(spacing: 20) {
             Image(systemName: "checkmark.circle.fill")
-                .font(.system(size: 64))
+                .font(.system(size: 52))
                 .foregroundStyle(.green)
 
             Text("You're All Set!")
-                .font(.system(size: 32, weight: .bold, design: .rounded))
+                .font(.system(size: 26, weight: .bold, design: .rounded))
                 .foregroundStyle(.white)
 
-            VStack(alignment: .leading, spacing: 12) {
-                tipRow(icon: "rectangle.topthird.inset.filled", text: "Hover over the notch to expand AICP")
-                tipRow(icon: "text.bubble", text: "Type a prompt to send tasks to OpenClaw")
-                tipRow(icon: "bell", text: "You'll be notified when tasks need attention")
-                tipRow(icon: "gearshape", text: "Access settings from the menu bar icon")
+            VStack(alignment: .leading, spacing: 10) {
+                tipRow(icon: "rectangle.topthird.inset.filled", text: "Hover the notch to expand AICP")
+                tipRow(icon: "text.bubble", text: "Type a prompt to send tasks")
+                tipRow(icon: "bell", text: "Get notified when tasks need attention")
+                tipRow(icon: "gearshape", text: "Adjust gateways later in Settings")
             }
-            .frame(maxWidth: 380)
+            .frame(maxWidth: 320)
         }
     }
 
     private func tipRow(icon: String, text: String) -> some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 10) {
             Image(systemName: icon)
-                .font(.system(size: 14))
-                .foregroundStyle(.white.opacity(0.5))
-                .frame(width: 20)
+                .font(.system(size: 12))
+                .foregroundStyle(.white.opacity(0.4))
+                .frame(width: 18)
             Text(text)
-                .font(.system(size: 14))
-                .foregroundStyle(.white.opacity(0.8))
+                .font(.system(size: 13))
+                .foregroundStyle(.white.opacity(0.7))
         }
     }
 }

@@ -65,7 +65,7 @@ struct CursorProcessSnapshotParser {
 final class CursorTaskSource: TaskSource, @unchecked Sendable {
     let sourceKind: TaskSourceKind = .cursor
 
-    private static let log = CompanionDiagnostics.logger(category: "CursorTaskSource")
+    private static let log = ControlPlaneDiagnostics.logger(category: "CursorTaskSource")
 
     private let bundleIdentifier = "com.todesktop.230313mzl4w4u92"
     private let pollInterval: TimeInterval

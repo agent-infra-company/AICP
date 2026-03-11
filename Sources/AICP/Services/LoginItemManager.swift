@@ -7,7 +7,7 @@ protocol LoginItemManaging: AnyObject {
 }
 
 final class LoginItemManager: LoginItemManaging {
-    private static let log = CompanionDiagnostics.logger(category: "LoginItemManager")
+    private static let log = ControlPlaneDiagnostics.logger(category: "LoginItemManager")
 
     func setEnabled(_ enabled: Bool) throws {
         guard #available(macOS 13.0, *) else {

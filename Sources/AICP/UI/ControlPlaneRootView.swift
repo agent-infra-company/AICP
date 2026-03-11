@@ -33,13 +33,13 @@ private let sampleRolodexTasks: [SampleRolodexTask] = [
     .init(workspace: "ferry", name: "apupneja/api-v2-migrate", status: "Queued", gridMode: .greyed),
 ]
 
-struct CompanionRootView: View {
-    @ObservedObject var core: CompanionCore
+struct ControlPlaneRootView: View {
+    @ObservedObject var core: ControlPlaneCore
 
     var body: some View {
         ZStack(alignment: .top) {
             if core.isExpanded {
-                ExpandedCompanionView(core: core)
+                ExpandedControlPlaneView(core: core)
                     .transition(
                         .asymmetric(
                             insertion: .scale(scale: 0.92, anchor: .top)
@@ -50,7 +50,7 @@ struct CompanionRootView: View {
                         )
                     )
             } else {
-                CollapsedCompanionView(core: core)
+                CollapsedControlPlaneView(core: core)
                     .transition(.opacity)
             }
         }
@@ -63,8 +63,8 @@ struct CompanionRootView: View {
 
 // MARK: - Collapsed Views
 
-private struct CollapsedCompanionView: View {
-    @ObservedObject var core: CompanionCore
+private struct CollapsedControlPlaneView: View {
+    @ObservedObject var core: ControlPlaneCore
 
     var body: some View {
         if core.notchDisplayInfo.hasNotch {
@@ -113,7 +113,7 @@ private struct NotchOutlineShape: Shape {
 }
 
 private struct NotchGradientCollapsedView: View {
-    @ObservedObject var core: CompanionCore
+    @ObservedObject var core: ControlPlaneCore
     @State private var toastExpanded = false
     @State private var toastHoverTimer: DispatchWorkItem?
 
@@ -317,7 +317,7 @@ private func toastStatusLabel(_ status: TaskStatus) -> String {
 }
 
 private struct PillCollapsedView: View {
-    @ObservedObject var core: CompanionCore
+    @ObservedObject var core: ControlPlaneCore
     @State private var toastExpanded = false
     @State private var toastHoverTimer: DispatchWorkItem?
 
@@ -429,8 +429,8 @@ private struct PillCollapsedView: View {
 
 // MARK: - Expanded View
 
-private struct ExpandedCompanionView: View {
-    @ObservedObject var core: CompanionCore
+private struct ExpandedControlPlaneView: View {
+    @ObservedObject var core: ControlPlaneCore
 
     private var notchTop: CGFloat {
         core.notchDisplayInfo.hasNotch ? core.notchDisplayInfo.notchHeight : 0
@@ -540,21 +540,33 @@ private struct ExpandedCompanionView: View {
                                         Task { await core.submitPrompt() }
                                     }
 
-                                if core.availableCLIs.count > 1 {
-                                    Menu {
-                                        ForEach(core.availableCLIs, id: \.rawValue) { cli in
-                                            Button {
-                                                core.selectCLI(cli)
-                                            } label: {
-                                                HStack {
-                                                    Text(cli.displayName)
-                                                    if cli == core.selectedCLI {
-                                                        Image(systemName: "checkmark")
+                                if !core.availableCLIs.isEmpty {
+                                    if core.availableCLIs.count > 1 {
+                                        Menu {
+                                            ForEach(core.availableCLIs, id: \.rawValue) { cli in
+                                                Button {
+                                                    core.selectCLI(cli)
+                                                } label: {
+                                                    HStack {
+                                                        Text(cli.displayName)
+                                                        if cli == core.selectedCLI {
+                                                            Image(systemName: "checkmark")
+                                                        }
                                                     }
                                                 }
                                             }
+                                        } label: {
+                                            Text(cliPickerLabel(core.selectedCLI))
+                                                .font(.system(size: 10, weight: .medium))
+                                                .foregroundStyle(.white.opacity(0.5))
+                                                .padding(.horizontal, 6)
+                                                .padding(.vertical, 3)
+                                                .background(Color.white.opacity(0.08))
+                                                .clipShape(Capsule())
                                         }
-                                    } label: {
+                                        .menuStyle(.borderlessButton)
+                                        .fixedSize()
+                                    } else {
                                         Text(cliPickerLabel(core.selectedCLI))
                                             .font(.system(size: 10, weight: .medium))
                                             .foregroundStyle(.white.opacity(0.5))
@@ -562,9 +574,8 @@ private struct ExpandedCompanionView: View {
                                             .padding(.vertical, 3)
                                             .background(Color.white.opacity(0.08))
                                             .clipShape(Capsule())
+                                            .fixedSize()
                                     }
-                                    .menuStyle(.borderlessButton)
-                                    .fixedSize()
                                 }
 
                                 if !core.composePrompt.trimmingCharacters(in: .whitespaces).isEmpty {
@@ -590,6 +601,31 @@ private struct ExpandedCompanionView: View {
                                     .foregroundStyle(.white.opacity(0.55))
                                     .padding(.horizontal, 14)
                                     .padding(.bottom, 8)
+                            }
+
+                            if let errorBanner = core.lastErrorBanner {
+                                HStack(spacing: 6) {
+                                    Image(systemName: "exclamationmark.triangle.fill")
+                                        .font(.system(size: 10))
+                                    Text(errorBanner)
+                                        .font(.system(size: 11))
+                                        .lineLimit(1)
+                                    Spacer()
+                                    Button {
+                                        core.lastErrorBanner = nil
+                                    } label: {
+                                        Image(systemName: "xmark")
+                                            .font(.system(size: 8, weight: .bold))
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                                .foregroundStyle(.orange)
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 6)
+                                .background(Color.orange.opacity(0.1))
+                                .clipShape(RoundedRectangle(cornerRadius: 6))
+                                .padding(.horizontal, 4)
+                                .padding(.bottom, 6)
                             }
 
                             // Rolodex task list (3 visible rows + top/bottom peeks)
@@ -1092,7 +1128,7 @@ private struct UnifiedTaskRow: View {
 // MARK: - Full Task List View
 
 private struct FullTaskListView: View {
-    @ObservedObject var core: CompanionCore
+    @ObservedObject var core: ControlPlaneCore
     let onBack: () -> Void
 
     private let pageSize = 20

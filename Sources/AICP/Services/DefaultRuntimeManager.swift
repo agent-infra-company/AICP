@@ -2,7 +2,7 @@ import Foundation
 import os.log
 
 actor DefaultRuntimeManager: RuntimeManager {
-    private static let log = CompanionDiagnostics.logger(category: "RuntimeManager")
+    private static let log = ControlPlaneDiagnostics.logger(category: "RuntimeManager")
 
     private var profilesById: [UUID: ProfileConfig] = [:]
     private var templatesById: [UUID: CommandTemplateSet] = [:]

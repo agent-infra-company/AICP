@@ -26,23 +26,46 @@ AICP lives near your MacBook's notch and acts as a lightweight command center fo
 
 ## Installation
 
+### Quick Install (recommended)
+
+```bash
+git clone https://github.com/apupneja/clawy.git
+cd clawy
+make install
+```
+
+This builds a release `.app` bundle and copies it to `/Applications`. Launch from Spotlight or `/Applications/AICP.app`.
+
 ### Download
 
-> Distribution builds coming soon. See [Building from Source](#building-from-source) below.
+Download the latest `.dmg` or `.zip` from [Releases](https://github.com/apupneja/clawy/releases), then drag `AICP.app` to `/Applications`.
 
 ### Building from Source
 
 ```bash
-# Clone the repository
-git clone <repo-url>
+git clone https://github.com/apupneja/clawy.git
 cd clawy
 
-# Build
-swift build
+# Build and run the .app bundle
+make app
+open dist/AICP.app
 
-# Run (development mode)
+# Or run in development mode (unbundled, limited features)
 swift run
 ```
+
+#### Build Commands
+
+| Command | Description |
+|---------|-------------|
+| `make app` | Build release `.app` bundle to `dist/` |
+| `make install` | Build and install to `/Applications` |
+| `make uninstall` | Remove from `/Applications` |
+| `make dmg` | Build and create a `.dmg` for distribution |
+| `make zip` | Build and create a `.zip` for distribution |
+| `make run` | Run in dev mode (unbundled) |
+| `make test` | Run tests |
+| `make clean` | Remove build artifacts |
 
 > **Note:** Running via `swift run` launches in unbundled mode. Menu bar integration, notification permissions, and the full onboarding flow require launching the built `.app` bundle.
 

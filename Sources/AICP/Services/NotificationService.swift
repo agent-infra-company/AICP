@@ -15,11 +15,21 @@ protocol NotificationService: AnyObject, Sendable {
 }
 
 final class UserNotificationService: NotificationService, @unchecked Sendable {
-    private static let log = CompanionDiagnostics.logger(category: "NotificationService")
+    private static let log = ControlPlaneDiagnostics.logger(category: "NotificationService")
 
     private var center: UNUserNotificationCenter? {
         guard AppRuntimeEnvironment.current.supportsNotifications else { return nil }
         return UNUserNotificationCenter.current()
+    }
+
+    private func canPostNotifications(using center: UNUserNotificationCenter) async -> Bool {
+        let settings = await center.notificationSettings()
+        switch settings.authorizationStatus {
+        case .authorized, .provisional, .ephemeral:
+            return true
+        default:
+            return false
+        }
     }
 
     func prepare() async throws {
@@ -107,6 +117,7 @@ final class UserNotificationService: NotificationService, @unchecked Sendable {
 
     private func send(title: String, body: String, task: TaskRecord) async {
         guard let center else { return }
+        guard await canPostNotifications(using: center) else { return }
         let content = UNMutableNotificationContent()
         content.title = title
         content.body = body
@@ -130,6 +141,7 @@ final class UserNotificationService: NotificationService, @unchecked Sendable {
 
     private func sendExternal(title: String, body: String, snapshot: ExternalTaskSnapshot) async {
         guard let center else { return }
+        guard await canPostNotifications(using: center) else { return }
         let content = UNMutableNotificationContent()
         content.title = title
         content.body = body

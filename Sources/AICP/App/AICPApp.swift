@@ -6,6 +6,24 @@ struct AICPApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     private let environment = AppRuntimeEnvironment.current
 
+    @ViewBuilder
+    private var menuBarLabel: some View {
+        HStack(spacing: 2) {
+            VStack(alignment: .leading, spacing: -1) {
+                Text("AI")
+                Text("CP")
+            }
+            .font(.system(size: 6.5, weight: .bold, design: .rounded))
+            .lineLimit(1)
+
+            RoundedRectangle(cornerRadius: 1.5, style: .continuous)
+                .frame(width: 4, height: 12)
+        }
+        .foregroundStyle(.primary)
+        .frame(width: 18, height: 14, alignment: .center)
+        .accessibilityLabel("AICP")
+    }
+
     var body: some Scene {
         Settings {
             if environment.isBundledApp {
@@ -21,13 +39,13 @@ struct AICPApp: App {
             }
         }
 
-        MenuBarExtra("AICP", systemImage: "capsule.tophalf.filled", isInserted: .constant(environment.supportsMenuBarExtra)) {
-            Button("Open Companion") {
+        MenuBarExtra(isInserted: .constant(environment.supportsMenuBarExtra)) {
+            Button("Open Control Plane") {
                 appDelegate.core.setExpanded(true)
             }
 
             Button("Settings") {
-                NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+                appDelegate.openSettingsWindow()
             }
 
             Divider()
@@ -35,7 +53,9 @@ struct AICPApp: App {
             Button("Quit") {
                 NSApp.terminate(nil)
             }
+        } label: {
+            menuBarLabel
         }
-        .menuBarExtraStyle(.window)
+        .menuBarExtraStyle(.menu)
     }
 }

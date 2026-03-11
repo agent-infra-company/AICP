@@ -1,39 +1,81 @@
 import SwiftUI
 
 struct OnboardingFlowView: View {
-    @ObservedObject var core: CompanionCore
+    @ObservedObject var core: ControlPlaneCore
     let onFinish: () -> Void
 
     @State private var currentStep = 0
 
-    private static let steps = [0, 1, 2, 3]
-    private var totalSteps: Int { Self.steps.count }
+    private let totalSteps = 5
 
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
 
             VStack(spacing: 0) {
+                // Draggable title bar area
+                Color.clear
+                    .frame(height: 28)
+
                 OnboardingProgressBar(current: currentStep, total: totalSteps)
-                    .padding(.top, 48)
-                    .padding(.horizontal, 48)
+                    .padding(.horizontal, 40)
 
                 Spacer()
 
                 Group {
                     switch currentStep {
                     case 0: OnboardingWelcomeStep()
-                    case 1: OnboardingNotificationStep(core: core)
-                    case 2: OnboardingProfileStep(core: core)
-                    case 3: OnboardingCompletionStep()
+                    case 1:
+                        OnboardingGatewayStep(
+                            onEnable: {
+                                await core.enableOpenClaw()
+                                withAnimation { currentStep += 1 }
+                            },
+                            onSkip: { withAnimation { currentStep += 1 } }
+                        )
+                    case 2:
+                        OnboardingPermissionStep(
+                            icon: "key.fill",
+                            title: "Secure Storage",
+                            description: "Use your Mac keychain for saved credentials and encrypted state after the local setup is explained.",
+                            privacyNote: "If you skip this, AICP keeps using local file storage for this install.",
+                            allowLabel: "Use Keychain",
+                            onAllow: {
+                                _ = await core.requestSecureStorageAccess()
+                                withAnimation { currentStep += 1 }
+                            },
+                            onSkip: { withAnimation { currentStep += 1 } }
+                        )
+                    case 3:
+                        OnboardingPermissionStep(
+                            icon: "bell.badge.fill",
+                            title: "Notifications",
+                            description: "Get notified when tasks complete, fail, or need your input.",
+                            privacyNote: AppRuntimeEnvironment.current.supportsNotifications
+                                ? nil
+                                : "Requires the app bundle. Run `make install` first.",
+                            onAllow: {
+                                if AppRuntimeEnvironment.current.supportsNotifications {
+                                    let result = await core.requestNotificationAuthorization()
+                                    if !result {
+                                        if let url = URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension") {
+                                            NSWorkspace.shared.open(url)
+                                        }
+                                    }
+                                }
+                                withAnimation { currentStep += 1 }
+                            },
+                            onSkip: { withAnimation { currentStep += 1 } }
+                        )
+                    case 4: OnboardingCompletionStep()
                     default: EmptyView()
                     }
                 }
                 .transition(.asymmetric(
-                    insertion: .move(edge: .trailing).combined(with: .opacity),
-                    removal: .move(edge: .leading).combined(with: .opacity)
+                    insertion: .opacity,
+                    removal: .opacity
                 ))
-                .animation(.spring(response: 0.4, dampingFraction: 0.85), value: currentStep)
+                .animation(.easeInOut(duration: 0.4), value: currentStep)
                 .id(currentStep)
 
                 Spacer()
@@ -41,14 +83,16 @@ struct OnboardingFlowView: View {
                 OnboardingNavBar(
                     currentStep: currentStep,
                     totalSteps: totalSteps,
+                    // Hide nav buttons on permission steps (they have their own Allow/Skip)
+                    hideNextButton: currentStep == 1 || currentStep == 2 || currentStep == 3,
                     onBack: { withAnimation { currentStep -= 1 } },
                     onNext: { withAnimation { currentStep += 1 } },
                     onFinish: onFinish
                 )
-                .padding(.bottom, 48)
-                .padding(.horizontal, 48)
+                .padding(.bottom, 36)
+                .padding(.horizontal, 40)
             }
         }
-        .frame(minWidth: 640, minHeight: 480)
+        .frame(minWidth: 480, minHeight: 540)
     }
 }

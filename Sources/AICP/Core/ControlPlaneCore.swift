@@ -34,6 +34,18 @@ struct NotchToast: Equatable {
 
 struct ExternalSnapshotActivityDetector {
     static func shouldAnnounce(old: ExternalTaskSnapshot?, new: ExternalTaskSnapshot) -> Bool {
+        // Cursor tasks: only announce when agent-exec role appears or disappears,
+        // not when a chat window is merely opened or closed.
+        if new.sourceKind == .cursor {
+            return shouldAnnounceCursor(old: old, new: new)
+        }
+
+        // Conductor tasks: don't announce idle sessions that just appeared
+        // (new chat opened). Only announce active work or status transitions.
+        if new.sourceKind == .conductor {
+            return shouldAnnounceConductor(old: old, new: new)
+        }
+
         guard let old else { return true }
         guard old.id == new.id, old.sourceKind == new.sourceKind else { return true }
 
@@ -57,6 +69,38 @@ struct ExternalSnapshotActivityDetector {
             && codexCLITurnChanged(old: old, new: new)
     }
 
+    /// For Conductor, don't announce when a session first appears as idle/completed
+    /// (just a new chat opened). Only announce actual status transitions.
+    private static func shouldAnnounceConductor(old: ExternalTaskSnapshot?, new: ExternalTaskSnapshot) -> Bool {
+        guard let old else {
+            // New session: only announce if it's actively working or needs input,
+            // not if it's just idle (.completed).
+            return new.status != .completed
+        }
+
+        // Only announce on actual status changes
+        return old.status != new.status
+    }
+
+    /// For Cursor, we can only detect meaningful activity via process roles.
+    /// Only announce when agent-exec role starts or stops (actual processing),
+    /// not when a chat is opened or closed.
+    private static func shouldAnnounceCursor(old: ExternalTaskSnapshot?, new: ExternalTaskSnapshot) -> Bool {
+        let newRoles = Set(new.metadata["roles"]?.components(separatedBy: ",") ?? [])
+        let hasAgent = newRoles.contains("agent-exec")
+
+        guard let old else {
+            // New Cursor task: only announce if agent is actively running
+            return hasAgent
+        }
+
+        let oldRoles = Set(old.metadata["roles"]?.components(separatedBy: ",") ?? [])
+        let hadAgent = oldRoles.contains("agent-exec")
+
+        // Announce when agent-exec appears or disappears (processing started/completed)
+        return hadAgent != hasAgent
+    }
+
     private static func codexCLITurnChanged(old: ExternalTaskSnapshot, new: ExternalTaskSnapshot) -> Bool {
         let oldTurnId = old.metadata["turnId"]
         let newTurnId = new.metadata["turnId"]
@@ -70,8 +114,8 @@ struct ExternalSnapshotActivityDetector {
 }
 
 @MainActor
-final class CompanionCore: ObservableObject {
-    private static let log = CompanionDiagnostics.logger(category: "CompanionCore")
+final class ControlPlaneCore: ObservableObject {
+    private static let log = ControlPlaneDiagnostics.logger(category: "ControlPlaneCore")
 
     enum Tab: String, CaseIterable, Identifiable {
         case compose = "Compose"
@@ -102,7 +146,7 @@ final class CompanionCore: ObservableObject {
     @Published var externalSnapshots: [TaskSourceKind: [ExternalTaskSnapshot]] = [:]
     @Published var activeToast: NotchToast?
 
-    @Published var selectedCLI: TaskSourceKind = .claudeCode
+    @Published var selectedCLI: TaskSourceKind = .openClaw
     @Published var availableCLIs: [TaskSourceKind] = []
     @Published var archivedTaskIds: Set<String> = []
 
@@ -155,10 +199,22 @@ final class CompanionCore: ObservableObject {
 
     func bootstrap() async {
         do {
-            let state = try await persistenceStore.loadState()
+            var state = try await persistenceStore.loadState()
+            // Migration: existing users with profiles should have openClawEnabled
+            if !state.profiles.isEmpty && !state.settings.openClawEnabled {
+                state.settings.openClawEnabled = true
+            }
             apply(state: state)
         } catch {
-            lastErrorBanner = error.localizedDescription
+            Self.log.error("Failed to load persisted state: \(error.localizedDescription, privacy: .public)")
+            lastErrorBanner = "Failed to load state: \(error.localizedDescription)"
+            let fallbackState = PersistedState.bootstrap()
+            apply(state: fallbackState)
+            do {
+                try await persistenceStore.saveState(fallbackState)
+            } catch {
+                Self.log.error("Failed to persist fallback state: \(error.localizedDescription, privacy: .public)")
+            }
         }
 
         do {
@@ -277,7 +333,7 @@ final class CompanionCore: ObservableObject {
         let applicationPaths = displayTask.activationApplicationPaths
 
         Self.log.debug(
-            "Attempting activation source=\(displayTask.sourceKind.rawValue, privacy: .public) bundleIds=\(CompanionDiagnostics.joined(bundleIdentifiers), privacy: .public) paths=\(CompanionDiagnostics.joined(applicationPaths), privacy: .public)"
+            "Attempting activation source=\(displayTask.sourceKind.rawValue, privacy: .public) bundleIds=\(ControlPlaneDiagnostics.joined(bundleIdentifiers), privacy: .public) paths=\(ControlPlaneDiagnostics.joined(applicationPaths), privacy: .public)"
         )
 
         for bundleId in bundleIdentifiers {
@@ -393,7 +449,37 @@ final class CompanionCore: ObservableObject {
         persistAsync()
     }
 
+    func enableOpenClaw() async {
+        settings.openClawEnabled = true
+        if profiles.isEmpty {
+            let templateSetId = commandTemplateSets.first?.id ?? CommandTemplateSet.localDefault.id
+            let localProfile = ProfileConfig.defaultLocal(commandTemplateSetId: templateSetId)
+            profiles.append(localProfile)
+            settings.selectedProfileId = localProfile.id
+            settings.selectedRouteByProfile[localProfile.id] = "default"
+            routesByProfile[localProfile.id] = [
+                RouteInfo(id: "default", displayName: "Default", metadata: [:])
+            ]
+        }
+        persistAsync()
+        await detectAvailableCLIs()
+    }
+
+    func disableOpenClaw() async {
+        settings.openClawEnabled = false
+        if selectedCLI == .openClaw {
+            let fallback = availableCLIs.first(where: { $0 != .openClaw })
+            if let fallback {
+                selectedCLI = fallback
+                settings.selectedCLI = fallback.rawValue
+            }
+        }
+        persistAsync()
+        await detectAvailableCLIs()
+    }
+
     func submitPrompt() async {
+        lastErrorBanner = nil
         let prompt = composePrompt.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !prompt.isEmpty else {
             lastErrorBanner = "Prompt cannot be empty."
@@ -490,14 +576,14 @@ final class CompanionCore: ObservableObject {
     private func detectAvailableCLIs() async {
         var available: [TaskSourceKind] = []
 
+        if settings.openClawEnabled && !profiles.isEmpty {
+            available.append(.openClaw)
+        }
         if await cliSessionLauncher.isAvailable(.claudeCode) {
             available.append(.claudeCode)
         }
         if await cliSessionLauncher.isAvailable(.codex) {
             available.append(.codex)
-        }
-        if !profiles.isEmpty {
-            available.append(.openClaw)
         }
 
         availableCLIs = available
@@ -509,10 +595,12 @@ final class CompanionCore: ObservableObject {
             selectedCLI = kind
         } else if let first = available.first {
             selectedCLI = first
+            settings.selectedCLI = first.rawValue
+            persistAsync()
         }
 
         Self.log.info(
-            "Detected available CLIs: \(CompanionDiagnostics.joined(available.map(\.displayName)), privacy: .public) selected=\(self.selectedCLI.displayName, privacy: .public)"
+            "Detected available CLIs: \(ControlPlaneDiagnostics.joined(available.map(\.displayName)), privacy: .public) selected=\(self.selectedCLI.displayName, privacy: .public)"
         )
     }
 
@@ -580,6 +668,21 @@ final class CompanionCore: ObservableObject {
         } catch {
             telemetryManager.record(.error("Notification authorization failed: \(error.localizedDescription)"))
             lastErrorBanner = "Notification authorization failed: \(error.localizedDescription)"
+            return false
+        }
+    }
+
+    func requestSecureStorageAccess() async -> Bool {
+        guard let controllableStore = secretStore as? InteractiveSecureStorageControlling else {
+            return false
+        }
+
+        do {
+            lastErrorBanner = nil
+            return try controllableStore.requestInteractivePrimaryAccess()
+        } catch {
+            telemetryManager.record(.error("Keychain access failed: \(error.localizedDescription)"))
+            lastErrorBanner = "Keychain access failed: \(error.localizedDescription)"
             return false
         }
     }
@@ -713,6 +816,15 @@ final class CompanionCore: ObservableObject {
     }
 
     private func process(event: GatewayEventEnvelope) async {
+        if event.eventType == "connection_error" {
+            if let profile = profiles.first(where: { $0.name == event.source }) {
+                connectionStateByProfile[profile.id] = "disconnected"
+            }
+            let detail = event.payload["error"] ?? "connection lost"
+            lastErrorBanner = "Gateway disconnected: \(detail)"
+            return
+        }
+
         guard var task = taskMatching(event: event) else {
             return
         }

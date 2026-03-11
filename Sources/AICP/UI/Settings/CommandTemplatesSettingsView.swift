@@ -1,51 +1,50 @@
 import SwiftUI
 
 struct CommandTemplatesSettingsView: View {
-    @ObservedObject var core: CompanionCore
+    @ObservedObject var core: ControlPlaneCore
     @State private var selectedTemplateId: UUID?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 24) {
-            Text("Command Templates")
-                .font(.title2.weight(.semibold))
-
-            GroupBox {
-                VStack(alignment: .leading, spacing: 16) {
-                    Picker(
-                        "Template Set",
-                        selection: Binding(
-                            get: { selectedTemplateId ?? core.commandTemplateSets.first?.id ?? UUID() },
-                            set: { selectedTemplateId = $0 }
-                        )
-                    ) {
-                        ForEach(core.commandTemplateSets) { set in
-                            Text(set.name).tag(set.id)
-                        }
-                    }
-
-                    if let set = currentTemplateSet {
-                        CommandTemplateEditor(set: set) { updated in
-                            core.upsertCommandTemplateSet(updated)
-                        }
-                    }
-
-                    Button("Add Template Set") {
-                        let newSet = CommandTemplateSet(
-                            id: UUID(),
-                            name: "Template \(core.commandTemplateSets.count + 1)",
-                            startCmd: "openclaw gateway start --port {{port}}",
-                            stopCmd: "openclaw gateway stop",
-                            restartCmd: "openclaw gateway restart --port {{port}}",
-                            statusCmd: "openclaw gateway status",
-                            allowedPlaceholders: ["host", "port", "gateway_url", "profile_name"]
-                        )
-                        core.upsertCommandTemplateSet(newSet)
-                        selectedTemplateId = newSet.id
+        Form {
+            Section {
+                Picker(
+                    "Template set",
+                    selection: Binding(
+                        get: { selectedTemplateId ?? core.commandTemplateSets.first?.id ?? UUID() },
+                        set: { selectedTemplateId = $0 }
+                    )
+                ) {
+                    ForEach(core.commandTemplateSets) { set in
+                        Text(set.name).tag(set.id)
                     }
                 }
-                .padding(8)
+                Button("Add Template Set") {
+                    let newSet = CommandTemplateSet(
+                        id: UUID(),
+                        name: "Template \(core.commandTemplateSets.count + 1)",
+                        startCmd: "openclaw gateway start --port {{port}}",
+                        stopCmd: "openclaw gateway stop",
+                        restartCmd: "openclaw gateway restart --port {{port}}",
+                        statusCmd: "openclaw gateway status",
+                        allowedPlaceholders: ["host", "port", "gateway_url", "profile_name"]
+                    )
+                    core.upsertCommandTemplateSet(newSet)
+                    selectedTemplateId = newSet.id
+                }
+            } header: {
+                Text("Template Sets")
+            } footer: {
+                Text("Templates define the shell commands used to manage gateway processes.")
+            }
+
+            if let set = currentTemplateSet {
+                CommandTemplateEditor(set: set) { updated in
+                    core.upsertCommandTemplateSet(updated)
+                }
             }
         }
+        .formStyle(.grouped)
+        .navigationTitle("Command Templates")
         .onAppear {
             selectedTemplateId = core.commandTemplateSets.first?.id
         }
@@ -67,15 +66,24 @@ struct CommandTemplateEditor: View {
     private static let placeholderPattern = #"^[a-zA-Z0-9_]+$"#
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        Section("Name") {
             TextField("Template name", text: $set.name)
-            TextField("Start command", text: $set.startCmd)
-            TextField("Stop command", text: $set.stopCmd)
-            TextField("Restart command", text: $set.restartCmd)
-            TextField("Status command", text: $set.statusCmd)
+        }
 
+        Section {
+            cmdRow("Start", text: $set.startCmd)
+            cmdRow("Stop", text: $set.stopCmd)
+            cmdRow("Restart", text: $set.restartCmd)
+            cmdRow("Status", text: $set.statusCmd)
+        } header: {
+            Text("Commands")
+        } footer: {
+            Text("Use {{name}} for placeholders.")
+        }
+
+        Section("Placeholders") {
             TextField(
-                "Allowed placeholders (comma separated)",
+                "host, port, gateway_url",
                 text: Binding(
                     get: { set.allowedPlaceholders.joined(separator: ", ") },
                     set: {
@@ -86,34 +94,45 @@ struct CommandTemplateEditor: View {
                     }
                 )
             )
+            .font(.system(.body, design: .monospaced))
 
             if let validationError {
-                Text(validationError)
-                    .font(.system(size: 11))
-                    .foregroundStyle(.red)
-            }
-
-            HStack {
-                Spacer()
-                Button("Save Template") {
-                    guard !set.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-                        validationError = "Template name cannot be empty."
-                        return
-                    }
-                    let invalidPlaceholders = set.allowedPlaceholders.filter {
-                        $0.range(of: Self.placeholderPattern, options: .regularExpression) == nil
-                    }
-                    guard invalidPlaceholders.isEmpty else {
-                        validationError = "Invalid placeholder names: \(invalidPlaceholders.joined(separator: ", ")). Only letters, numbers, and underscores allowed."
-                        return
-                    }
-                    validationError = nil
-                    onSave(set)
-                }
+                Text(validationError).font(.caption).foregroundStyle(.red)
             }
         }
-        .padding(10)
-        .background(Color.gray.opacity(0.08))
-        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+
+        Section {
+            HStack {
+                Spacer()
+                Button("Save Template") { saveTemplate() }
+                    .buttonStyle(.borderedProminent)
+            }
+        }
+    }
+
+    private func cmdRow(_ label: String, text: Binding<String>) -> some View {
+        HStack {
+            Text(label)
+                .foregroundStyle(.secondary)
+                .frame(width: 50, alignment: .leading)
+            TextField("", text: text)
+                .font(.system(.body, design: .monospaced))
+        }
+    }
+
+    private func saveTemplate() {
+        guard !set.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            validationError = "Template name cannot be empty."
+            return
+        }
+        let invalidPlaceholders = set.allowedPlaceholders.filter {
+            $0.range(of: Self.placeholderPattern, options: .regularExpression) == nil
+        }
+        guard invalidPlaceholders.isEmpty else {
+            validationError = "Invalid: \(invalidPlaceholders.joined(separator: ", "))"
+            return
+        }
+        validationError = nil
+        onSave(set)
     }
 }
