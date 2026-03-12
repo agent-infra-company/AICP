@@ -18,8 +18,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     private var settingsWindowController: NSWindowController?
 
     override init() {
-        let secretStore = SecretStoreFactory.create(service: "com.aicp.app")
-        let keyProvider = KeychainSymmetricKeyProvider(secretStore: secretStore)
+        let secretStore = FileSecretStore()
+        let keyProvider = FileBackedSymmetricKeyProvider(secretStore: secretStore)
         let persistenceStore = EncryptedPersistenceStore(keyProvider: keyProvider)
         let gatewayClient = OpenClawGatewayClient(secretStore: secretStore)
         let runtimeManager = DefaultRuntimeManager(commandExecutor: ShellCommandExecutor())
@@ -39,8 +39,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             telemetryManager: telemetryManager,
             loginItemManager: loginItemManager,
             retentionManager: retentionManager,
-            taskSourceAggregator: aggregator,
-            secretStore: secretStore
+            taskSourceAggregator: aggregator
         )
 
         super.init()
@@ -166,8 +165,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     ) {
         let userInfo = response.notification.request.content.userInfo
 
-        if let sourceKindRaw = userInfo["sourceKind"] as? String,
-           let _ = TaskSourceKind(rawValue: sourceKindRaw) {
+        if let _ = userInfo["sourceKind"] as? String {
             // External task notification — deep link to source app
             if let deepLinkStr = userInfo["deepLinkURL"] as? String,
                !deepLinkStr.isEmpty,

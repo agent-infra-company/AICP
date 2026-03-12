@@ -1,16 +1,75 @@
 import AppKit
 import Foundation
 
-enum TaskSourceKind: String, Codable, CaseIterable, Identifiable, Hashable {
-    case openClaw = "openclaw"
-    case conductor = "conductor"
-    case claudeCode = "claude_code"
-    case codex = "codex"
-    case claudeDesktop = "claude_desktop"
-    case cursor = "cursor"
-    case webAIChat = "web_ai_chat"
+enum TaskSourceKind: Codable, Identifiable, Hashable {
+    case openClaw
+    case conductor
+    case claudeCode
+    case codex
+    case claudeDesktop
+    case cursor
+    case webAIChat
+    case custom(String)
 
     var id: String { rawValue }
+
+    var rawValue: String {
+        switch self {
+        case .openClaw: "openclaw"
+        case .conductor: "conductor"
+        case .claudeCode: "claude_code"
+        case .codex: "codex"
+        case .claudeDesktop: "claude_desktop"
+        case .cursor: "cursor"
+        case .webAIChat: "web_ai_chat"
+        case .custom(let id): "custom_\(id)"
+        }
+    }
+
+    /// All built-in cases (for iteration where CaseIterable was used).
+    static var builtInCases: [TaskSourceKind] {
+        [.openClaw, .conductor, .claudeCode, .codex, .claudeDesktop, .cursor, .webAIChat]
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        let value = try container.decode(String.self)
+        self = Self.from(rawValue: value)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(rawValue)
+    }
+
+    /// Parse a raw string back to a TaskSourceKind, falling back to .custom for unknown values.
+    static func from(rawValue: String) -> TaskSourceKind {
+        switch rawValue {
+        case "openclaw": .openClaw
+        case "conductor": .conductor
+        case "claude_code": .claudeCode
+        case "codex": .codex
+        case "claude_desktop": .claudeDesktop
+        case "cursor": .cursor
+        case "web_ai_chat": .webAIChat
+        default:
+            if rawValue.hasPrefix("custom_") {
+                .custom(String(rawValue.dropFirst("custom_".count)))
+            } else {
+                .custom(rawValue)
+            }
+        }
+    }
+
+    var isCustom: Bool {
+        if case .custom = self { return true }
+        return false
+    }
+
+    var customId: String? {
+        if case .custom(let id) = self { return id }
+        return nil
+    }
 
     var displayName: String {
         switch self {
@@ -21,6 +80,7 @@ enum TaskSourceKind: String, Codable, CaseIterable, Identifiable, Hashable {
         case .claudeDesktop: "Claude Desktop"
         case .cursor: "Cursor"
         case .webAIChat: "Web AI"
+        case .custom(let id): id
         }
     }
 
@@ -33,6 +93,7 @@ enum TaskSourceKind: String, Codable, CaseIterable, Identifiable, Hashable {
         case .claudeDesktop: "bubble.left.and.bubble.right"
         case .cursor: "chevron.left.forwardslash.chevron.right"
         case .webAIChat: "globe"
+        case .custom: "puzzlepiece.extension"
         }
     }
 
@@ -46,6 +107,7 @@ enum TaskSourceKind: String, Codable, CaseIterable, Identifiable, Hashable {
         case .cursor: "icon_cursor"
         case .openClaw: nil
         case .webAIChat: nil
+        case .custom: nil
         }
     }
 
@@ -58,6 +120,21 @@ enum TaskSourceKind: String, Codable, CaseIterable, Identifiable, Hashable {
         case .claudeDesktop: "orange"
         case .cursor: "indigo"
         case .webAIChat: "cyan"
+        case .custom: "gray"
+        }
+    }
+
+    /// Hex color value for the icon.
+    var iconColorHexValue: String {
+        switch self {
+        case .openClaw: "#007AFF"
+        case .conductor: "#AF52DE"
+        case .claudeCode: "#34C759"
+        case .codex: "#5AC8FA"
+        case .claudeDesktop: "#FF9500"
+        case .cursor: "#5856D6"
+        case .webAIChat: "#32D5D0"
+        case .custom: "#888888"
         }
     }
 
@@ -70,6 +147,7 @@ enum TaskSourceKind: String, Codable, CaseIterable, Identifiable, Hashable {
         case .claudeDesktop: "claude"
         case .cursor: nil
         case .webAIChat: nil
+        case .custom: nil
         }
     }
 
@@ -95,6 +173,8 @@ enum TaskSourceKind: String, Codable, CaseIterable, Identifiable, Hashable {
                 "com.brave.Browser",
                 "com.microsoft.edgemac",
             ]
+        case .custom:
+            []
         }
     }
 
@@ -120,6 +200,8 @@ enum TaskSourceKind: String, Codable, CaseIterable, Identifiable, Hashable {
                 "/Applications/Brave Browser.app",
                 "/Applications/Microsoft Edge.app",
             ]
+        case .custom:
+            []
         }
     }
 }

@@ -12,8 +12,8 @@ struct GeneralSettingsView: View {
             Section("Behavior") {
                 Toggle("Launch at login", isOn: settingsBinding(\.launchAtLogin))
                 Toggle("Show in fullscreen spaces", isOn: settingsBinding(\.showInFullscreen))
-                Toggle("Hide in screen recordings", isOn: settingsBinding(\.hideInScreenRecording))
-                Toggle("Primary display only", isOn: settingsBinding(\.primaryDisplayOnly))
+                Toggle("Hide in screenshots and screen recordings", isOn: settingsBinding(\.hideInScreenRecording))
+                Toggle("Show on primary display only", isOn: settingsBinding(\.primaryDisplayOnly))
             }
 
             Section {
@@ -61,8 +61,6 @@ struct GeneralSettingsView: View {
             } footer: {
                 if !AppRuntimeEnvironment.current.supportsNotifications {
                     Text("Run `make install` and launch from /Applications to enable notifications.")
-                } else if !notificationsAuthorized && !checkingNotifications {
-                    Text("If AICP doesn't appear in System Settings, rebuild with `make install`.")
                 }
             }
 

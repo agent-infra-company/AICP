@@ -5,7 +5,7 @@ protocol SymmetricKeyProviding: AnyObject, Sendable {
     func loadOrCreateKey(reference: String) throws -> SymmetricKey
 }
 
-final class KeychainSymmetricKeyProvider: SymmetricKeyProviding, @unchecked Sendable {
+final class FileBackedSymmetricKeyProvider: SymmetricKeyProviding, @unchecked Sendable {
     private let secretStore: SecretStoring
 
     init(secretStore: SecretStoring) {

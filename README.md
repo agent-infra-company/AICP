@@ -96,18 +96,161 @@ Access settings from the menu bar icon. Configuration options include:
 - **About** — Version info, feedback links, diagnostics export
 
 
+## Registering a Custom Agent
+
+AICP exposes a standard process for registering, tracking, and messaging any agent. Whether you're running a remote agent behind an HTTP API, a local daemon, or a custom tool — you can plug it into AICP with a few lines of code or by pointing it at a URL.
+
+### Quick start: register a remote agent
+
+If your agent exposes a standard HTTP API (see contract below), register it in one call:
+
+```swift
+await core.registerRemoteAgent(
+    id: "my-agent",
+    displayName: "My Agent",
+    endpointURL: URL(string: "http://localhost:9000")!,
+    iconSystemName: "cpu",       // SF Symbol name
+    iconColorHex: "#FF6600"      // hex color for the icon
+)
+```
+
+The agent will immediately appear in the CLI picker, and AICP will start tracking its tasks and showing them in the notch UI.
+
+### Agent HTTP API contract
+
+Any agent that speaks this standard HTTP/WebSocket protocol works with AICP out of the box:
+
+| Endpoint | Method | Request Body | Response Body | Purpose |
+|---|---|---|---|---|
+| `/health` | `GET` | — | `2xx` | Health check / reachability |
+| `/routes` | `GET` | — | `[{"id": "...", "displayName": "...", "metadata": {}}]` | Discover capabilities |
+| `/tasks` | `POST` | `AgentMessage` (below) | `AgentResponse` (below) | Submit a task/message |
+| `/tasks/:id/answer` | `POST` | `{"answer": "..."}` | `2xx` | Answer a follow-up question |
+| `/events` | `WebSocket` | — | Stream of event envelope JSON frames | Real-time task updates |
+
+**AgentMessage** (POST `/tasks` body):
+```json
+{
+  "taskId": "uuid",
+  "routeId": "default",
+  "title": "Fix the login bug",
+  "prompt": "The login page throws a 500 when...",
+  "metadata": {}
+}
+```
+
+**AgentResponse** (POST `/tasks` response):
+```json
+{
+  "taskId": "uuid",
+  "sessionId": "optional-session-id",
+  "runId": "optional-run-id",
+  "status": "running",
+  "message": "Task accepted"
+}
+```
+
+**Event envelope** (WebSocket `/events` frames):
+```json
+{
+  "id": "event-uuid",
+  "source": "my-agent",
+  "taskId": "task-uuid",
+  "eventType": "progress",
+  "payload": {"progress": "Analyzing code...", "title": "Fix login bug"},
+  "receivedAt": "2025-01-01T00:00:00Z"
+}
+```
+
+Supported `eventType` values: `progress`, `needs_input`, `completed`, `failed`, `canceled`, `queued`.
+
+### Advanced: custom transport or monitor-only agents
+
+For agents that don't speak HTTP, implement the `AgentTransport` protocol directly:
+
+```swift
+// 1. Describe the agent
+let descriptor = AgentDescriptor(
+    id: "my-custom-agent",
+    displayName: "My Custom Agent",
+    iconSystemName: "cpu",
+    iconColorHex: "#FF6600",
+    supportsMessaging: true,
+    supportsFollowUp: true,
+    endpointURL: URL(string: "http://localhost:9000")!
+)
+
+// 2. Implement the transport protocol
+class MyTransport: AgentTransport {
+    let agentId = "my-custom-agent"
+    func discoverRoutes() async throws -> [RouteInfo] { ... }
+    func sendTask(_ message: AgentMessage) async throws -> AgentResponse { ... }
+    func answerFollowUp(taskId: String, answer: String) async throws { ... }
+    func subscribeEvents() async -> AsyncStream<GatewayEventEnvelope> { ... }
+    func isReachable() async -> Bool { ... }
+    func connect() async throws { ... }
+    func disconnect() async { ... }
+}
+
+// 3. Register
+await core.registerAgent(descriptor: descriptor, transport: MyTransport())
+```
+
+For **monitor-only agents** (track tasks without sending messages), implement `TaskSource` instead:
+
+```swift
+let descriptor = AgentDescriptor(
+    id: "my-watcher",
+    displayName: "My Watcher",
+    supportsMessaging: false
+)
+
+class MyMonitor: TaskSource {
+    let sourceKind: TaskSourceKind = .custom("my-watcher")
+    func startMonitoring() async -> AsyncStream<[ExternalTaskSnapshot]> { ... }
+    func stopMonitoring() async { ... }
+    func isAvailable() async -> Bool { ... }
+}
+
+await core.registerAgent(descriptor: descriptor, monitor: MyMonitor())
+```
+
+### Unregistering an agent
+
+```swift
+await core.unregisterAgent(id: "my-agent")
+```
+
+### Prompt for AI assistants
+
+Use this prompt to have an AI coding assistant set up agent registration for any application:
+
+> I want to register a custom agent with AICP (AI Control Plane). The agent is **[DESCRIBE YOUR AGENT — name, what it does, where it runs, its API endpoint if any]**.
+>
+> Please:
+> 1. Create an HTTP server that implements the AICP agent contract:
+>    - `GET /health` — return 200
+>    - `GET /routes` — return a JSON array of `{"id", "displayName", "metadata"}` objects
+>    - `POST /tasks` — accept `{"taskId", "routeId", "title", "prompt", "metadata"}`, start the work, return `{"taskId", "status": "running"}`
+>    - `POST /tasks/:id/answer` — accept `{"answer": "..."}` for follow-up questions
+>    - `WS /events` — stream JSON event envelopes with `{"id", "source", "taskId", "eventType", "payload", "receivedAt"}` where eventType is one of: `progress`, `needs_input`, `completed`, `failed`, `canceled`, `queued`
+> 2. Register it with AICP using `core.registerRemoteAgent(id: "...", displayName: "...", endpointURL: URL(string: "http://...")!)`.
+> 3. Show me how to verify it appears in the AICP notch UI and can receive messages.
+
 ## Architecture
 
 The app follows a layered architecture:
 
 ```
-UI (SwiftUI)  →  Core (CompanionCore + TaskStateMachine)  →  Services  →  Models
-                                                              ├── OpenClawGatewayClient
-                                                              ├── DefaultRuntimeManager
-                                                              ├── EncryptedPersistenceStore
-                                                              ├── TaskSourceAggregator
-                                                              ├── NotificationService
-                                                              └── TelemetryManager
+UI (SwiftUI)  →  Core (ControlPlaneCore + TaskStateMachine)  →  Services  →  Models
+                                                                 ├── AgentRegistry
+                                                                 ├── OpenClawGatewayClient
+                                                                 ├── HTTPAgentTransport
+                                                                 ├── DefaultRuntimeManager
+                                                                 ├── EncryptedPersistenceStore
+                                                                 ├── TaskSourceAggregator
+                                                                 ├── NotificationService
+                                                                 └── TelemetryManager
 ```
 
 See [`docs/`](docs/) for detailed product vision, UX documentation, technical architecture, and roadmap.

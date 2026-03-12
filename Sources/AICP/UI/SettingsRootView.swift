@@ -1,25 +1,5 @@
 import SwiftUI
 
-enum SettingsCategory: String, CaseIterable, Identifiable {
-    case general = "General"
-    case appearance = "Appearance"
-    case profiles = "Gateways"
-    case commandTemplates = "Command Templates"
-    case about = "About"
-
-    var id: String { rawValue }
-
-    var iconName: String {
-        switch self {
-        case .general: return "gear"
-        case .appearance: return "eye"
-        case .profiles: return "server.rack"
-        case .commandTemplates: return "terminal"
-        case .about: return "info.circle"
-        }
-    }
-}
-
 struct SettingsRootView: View {
     @ObservedObject var core: ControlPlaneCore
     @StateObject private var updateManager = UpdateManager()
@@ -34,12 +14,6 @@ struct SettingsRootView: View {
                 }
                 NavigationLink(value: "Appearance") {
                     Label("Appearance", systemImage: "eye")
-                }
-                NavigationLink(value: "Gateways") {
-                    Label("Gateways", systemImage: "server.rack")
-                }
-                NavigationLink(value: "Command Templates") {
-                    Label("Command Templates", systemImage: "terminal")
                 }
                 NavigationLink(value: "About") {
                     Label("About", systemImage: "info.circle")
@@ -56,10 +30,6 @@ struct SettingsRootView: View {
                     GeneralSettingsView(core: core)
                 case "Appearance":
                     AppearanceSettingsView(core: core)
-                case "Gateways":
-                    ProfilesSettingsView(core: core)
-                case "Command Templates":
-                    CommandTemplatesSettingsView(core: core)
                 case "About":
                     AboutSettingsView(updateManager: updateManager)
                 default:

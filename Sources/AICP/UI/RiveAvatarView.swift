@@ -4,7 +4,7 @@ import SwiftUI
 struct RiveAvatarView: View {
     @StateObject private var viewModel = RiveViewModel(
         fileName: "look",
-        in: Bundle.module,
+        in: Bundle.appModule,
         stateMachineName: nil,
         fit: .contain,
         alignment: .center,

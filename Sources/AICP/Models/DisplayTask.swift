@@ -70,13 +70,12 @@ struct DisplayTask: Identifiable, Hashable {
     /// Sort priority: lower values appear first in the task list.
     var sortPriority: Int {
         switch status {
-        case .needsInput, .needsAttention: return 0
-        case .running: return 1
-        case .queued: return 2
-        case .draft: return 3
-        case .completed: return 4
-        case .failed: return 4
-        case .canceled: return 4
+        case .running: return 0
+        case .queued: return 1
+        case .needsInput: return 2
+        case .needsAttention: return 3
+        case .draft: return 4
+        case .completed, .failed, .canceled: return 5
         }
     }
 
@@ -94,6 +93,37 @@ struct DisplayTask: Identifiable, Hashable {
         case .canceled: return "Canceled"
         case .draft: return "Draft"
         }
+    }
+
+    /// Whether this task is a CLI session running in a terminal.
+    var isTerminalSession: Bool {
+        if sourceKind == .claudeCode { return true }
+        if sourceKind == .codex, metadata["source"] == "cli" { return true }
+        return false
+    }
+
+    /// The icon image name to display, accounting for CLI sessions.
+    /// Terminal sessions show the terminal icon; app sessions show the app icon.
+    var resolvedIconImageName: String? {
+        if isTerminalSession { return "icon_terminal" }
+        return sourceKind.iconImageName
+    }
+
+    /// Short agent label shown alongside the terminal icon so the user
+    /// can tell which agent is running (e.g. "Claude Code" vs "Codex").
+    var agentLabel: String? {
+        guard isTerminalSession else { return nil }
+        return sourceKind.displayName
+    }
+
+    /// User-facing workspace/location label shown in the task row.
+    /// Conductor workspaces are clearer when identified by branch, since
+    /// `directory_name` is often just the ephemeral workspace folder name.
+    var locationLabel: String? {
+        if sourceKind == .conductor, let branch = metadata["branch"], !branch.isEmpty {
+            return branch
+        }
+        return workspace
     }
 
     var activationBundleIdentifiers: [String] {

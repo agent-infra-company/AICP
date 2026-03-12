@@ -3,7 +3,7 @@ import SwiftUI
 
 enum OnboardingAssetLoader {
     static func appIcon() -> NSImage? {
-        for bundle in [Bundle.module, Bundle.main] {
+        for bundle in [Bundle.appModule, Bundle.main] {
             if let url = bundle.url(forResource: "AppIcon", withExtension: "png"),
                let image = NSImage(contentsOf: url) {
                 return image

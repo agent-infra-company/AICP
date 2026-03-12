@@ -67,7 +67,7 @@ final class ClaudeCodeTaskSource: TaskSource, @unchecked Sendable {
         var skippedConductorProcesses = 0
 
         for line in lines {
-            guard isClaudeCLIProcess(line) else { continue }
+            guard Self.isTrackableClaudeCLIProcess(line) else { continue }
             guard !isConductorManagedClaudeProcess(line) else {
                 skippedConductorProcesses += 1
                 continue
@@ -157,7 +157,7 @@ final class ClaudeCodeTaskSource: TaskSource, @unchecked Sendable {
     /// Check if a ps output line represents a Claude CLI process.
     /// Uses broad string matching to handle paths with spaces (e.g. "Application Support/...").
     /// Filters out Claude Desktop (Electron), shell-snapshots, crashpad, and helper processes.
-    private func isClaudeCLIProcess(_ line: String) -> Bool {
+    nonisolated static func isTrackableClaudeCLIProcess(_ line: String) -> Bool {
         let trimmed = line.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty else { return false }
 
@@ -169,8 +169,17 @@ final class ClaudeCodeTaskSource: TaskSource, @unchecked Sendable {
         // Skip non-claude processes early
         guard commandLine.contains("claude") else { return false }
 
-        // Exclude Desktop app (Electron), helpers, crashpad, shell-snapshots, grep
-        let exclusions = ["Claude.app", "Claude Helper", "claude_crashpad", "shell-snapshots", "grep"]
+        // Exclude Desktop app helpers, crashpad, shell-snapshots, grep, and
+        // Claude Desktop's background local-agent workers.
+        let exclusions = [
+            "Claude.app",
+            "Claude Helper",
+            "Helpers/disclaimer",
+            "claude_crashpad",
+            "shell-snapshots",
+            "grep",
+            "local-agent-mode-sessions/skills-plugin",
+        ]
         for exclusion in exclusions {
             if commandLine.contains(exclusion) { return false }
         }
