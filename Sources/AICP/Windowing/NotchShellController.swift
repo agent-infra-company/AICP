@@ -352,7 +352,7 @@ final class NotchShellController {
 
     private func syncPanels(preferredScreen: NSScreen?, force: Bool = false) {
         let screens = desiredScreens(preferredScreen: preferredScreen)
-        let desiredIDs = Set(screens.compactMap(screenID(for:)))
+        let desiredIDs = Set(screens.compactMap { screenID(for: $0) })
 
         let removedIDs = panelsByScreenID.keys.filter { !desiredIDs.contains($0) }
         for screenID in removedIDs {
@@ -368,7 +368,7 @@ final class NotchShellController {
         } else if let activeScreenID, desiredIDs.contains(activeScreenID) {
             // Keep the existing active display.
         } else {
-            activeScreenID = screens.compactMap(screenID(for:)).first
+            activeScreenID = screens.compactMap { screenID(for: $0) }.first
         }
 
         for screen in screens {
