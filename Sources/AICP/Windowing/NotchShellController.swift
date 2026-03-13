@@ -6,6 +6,7 @@ struct NotchGeometry {
     let notchWidth: CGFloat
     let notchHeight: CGFloat
     let screenFrame: CGRect
+    let isVirtual: Bool
 
     var wingWidth: CGFloat {
         max(80, notchWidth * 0.35)
@@ -17,9 +18,28 @@ struct NotchGeometry {
 }
 
 @MainActor
+final class NotchPanelState: ObservableObject {
+    @Published var displayInfo: NotchDisplayInfo
+    @Published var isActiveDisplay: Bool
+
+    init(displayInfo: NotchDisplayInfo, isActiveDisplay: Bool) {
+        self.displayInfo = displayInfo
+        self.isActiveDisplay = isActiveDisplay
+    }
+}
+
+private struct ScreenPanelEntry {
+    let screenID: CGDirectDisplayID
+    let panel: NotchPanel
+    let state: NotchPanelState
+}
+
+@MainActor
 final class NotchShellController {
     private let core: ControlPlaneCore
-    private let panel: NotchPanel
+
+    private var panelsByScreenID: [CGDirectDisplayID: ScreenPanelEntry] = [:]
+    private var activeScreenID: CGDirectDisplayID?
 
     private var cancellables: Set<AnyCancellable> = []
     nonisolated(unsafe) private var globalMonitor: Any?
@@ -28,31 +48,22 @@ final class NotchShellController {
     nonisolated(unsafe) private var localMoveMonitor: Any?
     nonisolated(unsafe) private var screenObserver: NSObjectProtocol?
 
-    private var cachedNotchGeo: NotchGeometry?
-    private var cachedScreenFrame: CGRect = .zero
-
     private var collapseWorkItem: DispatchWorkItem?
     private var expandWorkItem: DispatchWorkItem?
     private var expandedAt: Date = .distantPast
 
     private static let expandedSize = CGSize(width: 800, height: 480)
+    private static let virtualNotchWidth: CGFloat = 150
+    private static let virtualNotchHeight: CGFloat = 27
 
     init(core: ControlPlaneCore) {
         self.core = core
-
-        let initialFrame = NSRect(x: 0, y: 0, width: Self.expandedSize.width, height: Self.expandedSize.height)
-        self.panel = NotchPanel(contentRect: initialFrame)
-        self.panel.contentView = NSHostingView(rootView: ControlPlaneRootView(core: core))
-        self.panel.ignoresMouseEvents = !core.isExpanded
 
         bindState()
         installClickMonitors()
         installHoverMonitors()
         installScreenObserver()
-        positionWindow()
-        applyVisibilityPreferences()
-        panel.orderFrontRegardless()
-        updateNotchInfo()
+        syncPanels(for: NSEvent.mouseLocation, force: true)
     }
 
     deinit {
@@ -74,7 +85,8 @@ final class NotchShellController {
     }
 
     func show() {
-        panel.orderFrontRegardless()
+        syncPanels(for: NSEvent.mouseLocation, force: true)
+        orderPanelsFront()
     }
 
     // MARK: - State Binding
@@ -82,14 +94,14 @@ final class NotchShellController {
     private func bindState() {
         core.$isExpanded
             .combineLatest(core.$activeToast)
-            .sink { [weak self] expanded, toast in
+            .sink { [weak self] expanded, _ in
                 guard let self else { return }
-                self.panel.ignoresMouseEvents = !expanded && toast == nil
-                self.panel.orderFrontRegardless()
+                self.updatePanelInteractivity()
+                self.orderPanelsFront()
                 if expanded {
                     self.expandedAt = Date()
                     self.cancelCollapseTimer()
-                    self.panel.makeKey()
+                    self.activePanel?.panel.makeKey()
                 }
             }
             .store(in: &cancellables)
@@ -97,7 +109,7 @@ final class NotchShellController {
         core.$settings
             .sink { [weak self] _ in
                 guard let self else { return }
-                self.applyVisibilityPreferences()
+                self.syncPanels(for: NSEvent.mouseLocation, force: true)
             }
             .store(in: &cancellables)
     }
@@ -107,12 +119,30 @@ final class NotchShellController {
         if core.shouldShowFullscreen() {
             behavior.insert(.fullScreenAuxiliary)
         }
-        panel.collectionBehavior = behavior
 
-        if core.shouldHideFromScreenRecording() {
-            panel.sharingType = .none
-        } else {
-            panel.sharingType = .readOnly
+        for entry in panelsByScreenID.values {
+            entry.panel.collectionBehavior = behavior
+            entry.panel.sharingType = core.shouldHideFromScreenRecording() ? .none : .readOnly
+        }
+    }
+
+    private func updatePanelInteractivity() {
+        for entry in panelsByScreenID.values {
+            let isExpandedOnDisplay = core.isExpanded && entry.state.isActiveDisplay
+            entry.panel.ignoresMouseEvents = !isExpandedOnDisplay && core.activeToast == nil
+        }
+    }
+
+    private func orderPanelsFront() {
+        let orderedPanels = panelsByScreenID.values.sorted { lhs, rhs in
+            if lhs.state.isActiveDisplay == rhs.state.isActiveDisplay {
+                return lhs.screenID < rhs.screenID
+            }
+            return !lhs.state.isActiveDisplay && rhs.state.isActiveDisplay
+        }
+
+        for entry in orderedPanels {
+            entry.panel.orderFrontRegardless()
         }
     }
 
@@ -126,11 +156,7 @@ final class NotchShellController {
         ) { [weak self] _ in
             guard let self else { return }
             Task { @MainActor in
-                self.cachedNotchGeo = nil
-                self.cachedScreenFrame = .zero
-                self.positionWindow()
-                self.updateNotchInfo()
-                self.applyVisibilityPreferences()
+                self.syncPanels(for: NSEvent.mouseLocation, force: true)
             }
         }
     }
@@ -156,16 +182,22 @@ final class NotchShellController {
 
     private func handleIncomingClick(point: NSPoint) {
         Task { @MainActor in
-            guard let screen = primaryScreen else {
+            guard let screen = resolvedScreen(for: point) else {
                 return
             }
 
+            if !core.isExpanded {
+                syncPanels(preferredScreen: screen)
+            }
+
             if core.isExpanded {
-                if !panel.frame.contains(point) {
+                guard let activePanel else {
+                    return
+                }
+                if !activePanel.panel.frame.contains(point) {
                     cancelCollapseTimer()
                     core.setExpanded(false)
                 } else {
-                    // User clicked inside the panel — cancel any pending collapse
                     cancelCollapseTimer()
                 }
             } else {
@@ -173,7 +205,7 @@ final class NotchShellController {
                 if notchRect.contains(point) {
                     cancelCollapseTimer()
                     core.setExpanded(true)
-                    panel.makeKeyAndOrderFront(nil)
+                    activePanel?.panel.makeKeyAndOrderFront(nil)
                 }
             }
         }
@@ -194,24 +226,26 @@ final class NotchShellController {
 
     private func handleMouseMoved(point: NSPoint) {
         Task { @MainActor in
-            guard let screen = primaryScreen else { return }
+            guard let screen = resolvedScreen(for: point) else { return }
+
+            if !core.isExpanded {
+                syncPanels(preferredScreen: screen)
+            }
 
             if core.isExpanded {
-                let panelRect = panel.frame.insetBy(dx: -10, dy: -10)
+                guard let activePanel else { return }
+                let panelRect = activePanel.panel.frame.insetBy(dx: -10, dy: -10)
                 if panelRect.contains(point) {
                     cancelCollapseTimer()
                 } else {
                     startCollapseTimer()
                 }
-                // Cancel any pending expand if mouse left the notch zone
                 cancelExpandTimer()
             } else {
                 let hoverRect = notchHoverRect(in: screen)
                 if hoverRect.contains(point) {
-                    // Start expand timer — must hold for 2s
                     startExpandTimer()
                 } else {
-                    // Mouse left the notch zone — cancel pending expand
                     cancelExpandTimer()
                 }
             }
@@ -226,7 +260,7 @@ final class NotchShellController {
                 guard let self else { return }
                 self.expandWorkItem = nil
                 self.core.setExpanded(true)
-                self.panel.orderFrontRegardless()
+                self.orderPanelsFront()
             }
         }
         expandWorkItem = item
@@ -240,8 +274,6 @@ final class NotchShellController {
 
     private func startCollapseTimer() {
         guard !core.isSubmitting else { return }
-        // Grace period: don't auto-collapse within 1.5s of expanding (e.g. when
-        // opened via the menu bar button while the cursor is elsewhere).
         guard Date().timeIntervalSince(expandedAt) > 1.5 else { return }
         guard collapseWorkItem == nil else { return }
 
@@ -261,30 +293,128 @@ final class NotchShellController {
         collapseWorkItem = nil
     }
 
-    // MARK: - Notch Geometry
+    // MARK: - Screen Selection
 
-    private var primaryScreen: NSScreen? {
-        panel.screen
-            ?? NSScreen.main
-            ?? NSScreen.screens.first(where: Self.hasHardwareNotch)
+    private var activePanel: ScreenPanelEntry? {
+        guard let activeScreenID else {
+            return panelsByScreenID.values.first
+        }
+        return panelsByScreenID[activeScreenID] ?? panelsByScreenID.values.first
+    }
+
+    private var defaultScreen: NSScreen? {
+        NSScreen.main
             ?? NSScreen.screens.first(where: { $0.frame.origin == .zero })
             ?? NSScreen.screens.first
     }
 
-    private nonisolated static func hasHardwareNotch(_ screen: NSScreen) -> Bool {
-        screen.safeAreaInsets.top > 0
-            || (screen.auxiliaryTopLeftArea != nil && screen.auxiliaryTopRightArea != nil)
+    private func screenID(for screen: NSScreen) -> CGDirectDisplayID? {
+        guard let number = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber else {
+            return nil
+        }
+        return CGDirectDisplayID(number.uint32Value)
     }
 
-    private func notchGeometry(for screen: NSScreen) -> NotchGeometry? {
-        if screen.frame == cachedScreenFrame, let cached = cachedNotchGeo {
-            return cached
-        }
-        let geo = detectNotchGeometry(screen: screen)
-        cachedNotchGeo = geo
-        cachedScreenFrame = screen.frame
-        return geo
+    private func screen(for id: CGDirectDisplayID) -> NSScreen? {
+        NSScreen.screens.first(where: { screenID(for: $0) == id })
     }
+
+    private func screen(containing point: NSPoint) -> NSScreen? {
+        NSScreen.screens.first(where: { $0.frame.contains(point) })
+    }
+
+    private func resolvedScreen(for point: NSPoint? = nil) -> NSScreen? {
+        if let point, let screen = screen(containing: point) {
+            return screen
+        }
+        if let activeScreenID, let screen = screen(for: activeScreenID) {
+            return screen
+        }
+        return defaultScreen
+    }
+
+    private func desiredScreens(preferredScreen: NSScreen?) -> [NSScreen] {
+        if core.settings.primaryDisplayOnly {
+            if let preferredScreen {
+                return [preferredScreen]
+            }
+            if let defaultScreen {
+                return [defaultScreen]
+            }
+            return []
+        }
+        return NSScreen.screens
+    }
+
+    private func syncPanels(for point: NSPoint? = nil, force: Bool = false) {
+        syncPanels(preferredScreen: resolvedScreen(for: point), force: force)
+    }
+
+    private func syncPanels(preferredScreen: NSScreen?, force: Bool = false) {
+        let screens = desiredScreens(preferredScreen: preferredScreen)
+        let desiredIDs = Set(screens.compactMap { screenID(for: $0) })
+
+        let removedIDs = panelsByScreenID.keys.filter { !desiredIDs.contains($0) }
+        for screenID in removedIDs {
+            guard let entry = panelsByScreenID.removeValue(forKey: screenID) else { continue }
+            entry.panel.orderOut(nil)
+            entry.panel.close()
+        }
+
+        if let preferredScreen,
+           let preferredID = screenID(for: preferredScreen),
+           desiredIDs.contains(preferredID) {
+            activeScreenID = preferredID
+        } else if let activeScreenID, desiredIDs.contains(activeScreenID) {
+            // Keep the existing active display.
+        } else {
+            activeScreenID = screens.compactMap { screenID(for: $0) }.first
+        }
+
+        for screen in screens {
+            guard let screenID = screenID(for: screen) else { continue }
+            let displayInfo = displayInfo(for: screen)
+            let isActiveDisplay = screenID == activeScreenID
+
+            if let entry = panelsByScreenID[screenID] {
+                if entry.state.displayInfo != displayInfo {
+                    entry.state.displayInfo = displayInfo
+                }
+                if entry.state.isActiveDisplay != isActiveDisplay {
+                    entry.state.isActiveDisplay = isActiveDisplay
+                }
+                position(entry.panel, on: screen)
+            } else {
+                let state = NotchPanelState(displayInfo: displayInfo, isActiveDisplay: isActiveDisplay)
+                let panel = makePanel(state: state)
+                position(panel, on: screen)
+                panelsByScreenID[screenID] = ScreenPanelEntry(
+                    screenID: screenID,
+                    panel: panel,
+                    state: state
+                )
+            }
+        }
+
+        updateActiveDisplayInfo()
+        applyVisibilityPreferences()
+        updatePanelInteractivity()
+        orderPanelsFront()
+    }
+
+    private func makePanel(state: NotchPanelState) -> NotchPanel {
+        let initialFrame = NSRect(
+            x: 0,
+            y: 0,
+            width: Self.expandedSize.width,
+            height: Self.expandedSize.height
+        )
+        let panel = NotchPanel(contentRect: initialFrame)
+        panel.contentView = NSHostingView(rootView: ControlPlaneRootView(core: core, panelState: state))
+        return panel
+    }
+
+    // MARK: - Notch Geometry
 
     private func detectNotchGeometry(screen: NSScreen) -> NotchGeometry? {
         if let leftArea = screen.auxiliaryTopLeftArea,
@@ -295,21 +425,50 @@ final class NotchShellController {
                 return NotchGeometry(
                     notchWidth: notchWidth,
                     notchHeight: notchHeight,
-                    screenFrame: screen.frame
+                    screenFrame: screen.frame,
+                    isVirtual: false
                 )
             }
         }
 
-        guard screen.safeAreaInsets.top > 0 else {
+        if screen.safeAreaInsets.top > 0 {
+            let estimatedNotchWidth: CGFloat = 210
+            return NotchGeometry(
+                notchWidth: estimatedNotchWidth,
+                notchHeight: max(screen.safeAreaInsets.top, 38),
+                screenFrame: screen.frame,
+                isVirtual: false
+            )
+        }
+
+        guard core.settings.virtualNotchEnabled else {
             return nil
         }
 
-        let estimatedNotchWidth: CGFloat = 210
         return NotchGeometry(
-            notchWidth: estimatedNotchWidth,
-            notchHeight: max(screen.safeAreaInsets.top, 38),
-            screenFrame: screen.frame
+            notchWidth: Self.virtualNotchWidth,
+            notchHeight: Self.virtualNotchHeight,
+            screenFrame: screen.frame,
+            isVirtual: true
         )
+    }
+
+    private func notchGeometry(for screen: NSScreen) -> NotchGeometry? {
+        detectNotchGeometry(screen: screen)
+    }
+
+    private func displayInfo(for screen: NSScreen) -> NotchDisplayInfo {
+        if let geo = notchGeometry(for: screen) {
+            return NotchDisplayInfo(
+                hasNotch: true,
+                isVirtualNotch: geo.isVirtual,
+                notchWidth: geo.notchWidth,
+                notchHeight: geo.notchHeight,
+                wingWidth: geo.wingWidth,
+                totalCollapsedWidth: geo.collapsedWindowWidth
+            )
+        }
+        return .noNotch
     }
 
     private func notchHitRect(in screen: NSScreen) -> CGRect {
@@ -321,23 +480,21 @@ final class NotchShellController {
                 width: geo.collapsedWindowWidth + 2 * padding,
                 height: geo.notchHeight + padding
             )
-        } else {
-            let frame = screen.frame
-            let width = min(max(frame.width * 0.22, 260), 420)
-            let height: CGFloat = 60
-            return CGRect(
-                x: frame.midX - width / 2,
-                y: frame.maxY - height,
-                width: width,
-                height: height
-            )
         }
+
+        let frame = screen.frame
+        let width = min(max(frame.width * 0.22, 260), 420)
+        let height: CGFloat = 60
+        return CGRect(
+            x: frame.midX - width / 2,
+            y: frame.maxY - height,
+            width: width,
+            height: height
+        )
     }
 
     private func notchHoverRect(in screen: NSScreen) -> CGRect {
         if let geo = notchGeometry(for: screen) {
-            // Keep hover activation constrained to the physical notch bounds so
-            // side toast-wing travel does not trigger drawer expansion.
             let widthPadding: CGFloat = 8
             let activationWidth = geo.notchWidth + 2 * widthPadding
             let activationHeight = min(max(geo.notchHeight + 2, 24), 40)
@@ -347,26 +504,22 @@ final class NotchShellController {
                 width: activationWidth,
                 height: activationHeight
             )
-        } else {
-            let frame = screen.frame
-            let width = min(max(frame.width * 0.14, 180), 280)
-            let activationHeight: CGFloat = 32
-            return CGRect(
-                x: frame.midX - width / 2,
-                y: frame.maxY - activationHeight,
-                width: width,
-                height: activationHeight
-            )
         }
+
+        let frame = screen.frame
+        let width = min(max(frame.width * 0.14, 180), 280)
+        let activationHeight: CGFloat = 32
+        return CGRect(
+            x: frame.midX - width / 2,
+            y: frame.maxY - activationHeight,
+            width: width,
+            height: activationHeight
+        )
     }
 
     // MARK: - Window Positioning
 
-    private func positionWindow() {
-        guard let screen = primaryScreen else {
-            return
-        }
-
+    private func position(_ panel: NotchPanel, on screen: NSScreen) {
         let size = Self.expandedSize
         let frame = CGRect(
             x: screen.frame.midX - size.width / 2,
@@ -377,20 +530,7 @@ final class NotchShellController {
         panel.setFrame(frame, display: true)
     }
 
-    private func updateNotchInfo() {
-        guard let screen = primaryScreen else {
-            return
-        }
-        if let geo = notchGeometry(for: screen) {
-            core.notchDisplayInfo = NotchDisplayInfo(
-                hasNotch: true,
-                notchWidth: geo.notchWidth,
-                notchHeight: geo.notchHeight,
-                wingWidth: geo.wingWidth,
-                totalCollapsedWidth: geo.collapsedWindowWidth
-            )
-        } else {
-            core.notchDisplayInfo = .noNotch
-        }
+    private func updateActiveDisplayInfo() {
+        core.notchDisplayInfo = activePanel?.state.displayInfo ?? .noNotch
     }
 }

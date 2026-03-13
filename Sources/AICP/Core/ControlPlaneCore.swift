@@ -6,6 +6,7 @@ import os.log
 
 struct NotchDisplayInfo: Equatable {
     let hasNotch: Bool
+    let isVirtualNotch: Bool
     let notchWidth: CGFloat
     let notchHeight: CGFloat
     let wingWidth: CGFloat
@@ -13,6 +14,7 @@ struct NotchDisplayInfo: Equatable {
 
     static let noNotch = NotchDisplayInfo(
         hasNotch: false,
+        isVirtualNotch: false,
         notchWidth: 0,
         notchHeight: 38,
         wingWidth: 0,
@@ -44,6 +46,13 @@ struct ExternalSnapshotActivityDetector {
         // (new chat opened). Only announce active work or status transitions.
         if new.sourceKind == .conductor {
             return shouldAnnounceConductor(old: old, new: new)
+        }
+
+        // Claude Code tasks: don't announce when a terminal is first opened.
+        // Only announce on status transitions (e.g. when a message is sent and
+        // Claude responds), not on initial process detection.
+        if new.sourceKind == .claudeCode {
+            return shouldAnnounceClaudeCode(old: old, new: new)
         }
 
         guard let old else { return true }
@@ -80,6 +89,30 @@ struct ExternalSnapshotActivityDetector {
 
         // Only announce on actual status changes
         return old.status != new.status
+    }
+
+    /// For Claude Code, don't announce when the terminal process is first detected
+    /// or when the `claude` command is launched. Only announce once a message has
+    /// been processed (status transition from running → needsInput or vice-versa),
+    /// or when a needsInput prompt advances (new question from Claude).
+    private static func shouldAnnounceClaudeCode(old: ExternalTaskSnapshot?, new: ExternalTaskSnapshot) -> Bool {
+        guard let old else {
+            // New process detected — don't toast on initial terminal open.
+            return false
+        }
+
+        // Announce on status changes (e.g. running → needsInput)
+        if old.status != new.status {
+            return true
+        }
+
+        // Also announce when needsInput updates (Claude asked a new question)
+        if new.status == .needsInput && old.status == .needsInput {
+            let updatedRecently = new.updatedAt.timeIntervalSince(old.updatedAt) > 1
+            return updatedRecently
+        }
+
+        return false
     }
 
     /// For Cursor, we can only detect meaningful activity via process roles.
@@ -149,6 +182,7 @@ final class ControlPlaneCore: ObservableObject {
     @Published var selectedCLI: TaskSourceKind = .openClaw
     @Published var availableCLIs: [TaskSourceKind] = []
     @Published var archivedTaskIds: Set<String> = []
+    @Published var registeredAgentDescriptors: [AgentDescriptor] = []
 
     private let stateMachine = TaskStateMachine()
     private let gatewayClient: GatewayClient
@@ -160,11 +194,12 @@ final class ControlPlaneCore: ObservableObject {
     private let retentionManager: RetentionManaging
     private let taskSourceAggregator: TaskSourceAggregator
     private let cliSessionLauncher: CLISessionLauncher
-    private let secretStore: SecretStoring?
+    let agentRegistry: AgentRegistry
 
     private var eventTasks: [UUID: Task<Void, Never>] = [:]
     private var aggregatorTask: Task<Void, Never>?
     private var toastDismissTask: Task<Void, Never>?
+    private var registryEventTask: Task<Void, Never>?
 
     init(
         gatewayClient: GatewayClient,
@@ -175,8 +210,8 @@ final class ControlPlaneCore: ObservableObject {
         loginItemManager: LoginItemManaging,
         retentionManager: RetentionManaging,
         taskSourceAggregator: TaskSourceAggregator,
-        cliSessionLauncher: CLISessionLauncher = CLISessionLauncher(),
-        secretStore: SecretStoring? = nil
+        agentRegistry: AgentRegistry = AgentRegistry(),
+        cliSessionLauncher: CLISessionLauncher = CLISessionLauncher()
     ) {
         self.gatewayClient = gatewayClient
         self.runtimeManager = runtimeManager
@@ -186,8 +221,8 @@ final class ControlPlaneCore: ObservableObject {
         self.loginItemManager = loginItemManager
         self.retentionManager = retentionManager
         self.taskSourceAggregator = taskSourceAggregator
+        self.agentRegistry = agentRegistry
         self.cliSessionLauncher = cliSessionLauncher
-        self.secretStore = secretStore
     }
 
     deinit {
@@ -195,6 +230,7 @@ final class ControlPlaneCore: ObservableObject {
             task.cancel()
         }
         aggregatorTask?.cancel()
+        registryEventTask?.cancel()
     }
 
     func bootstrap() async {
@@ -237,9 +273,86 @@ final class ControlPlaneCore: ObservableObject {
             await refreshRoutes(profile)
         }
 
+        await agentRegistry.setAggregator(taskSourceAggregator)
+        startRegistryEventListener()
+
         await detectAvailableCLIs()
 
         await startExternalTaskMonitoring()
+    }
+
+    private func startRegistryEventListener() {
+        let stream = agentRegistry.eventStream
+        registryEventTask = Task { [weak self] in
+            for await event in stream {
+                guard let self else { return }
+                switch event {
+                case .registered(let descriptor):
+                    if !self.registeredAgentDescriptors.contains(where: { $0.id == descriptor.id }) {
+                        self.registeredAgentDescriptors.append(descriptor)
+                    }
+                    self.persistAsync()
+                    await self.detectAvailableCLIs()
+                case .unregistered(let agentId):
+                    self.registeredAgentDescriptors.removeAll { $0.id == agentId }
+                    self.persistAsync()
+                    await self.detectAvailableCLIs()
+                }
+            }
+        }
+    }
+
+    // MARK: - Agent Registration API
+
+    /// Register any agent for tracking and/or messaging.
+    ///
+    /// This is the standard entry point for adding custom agents to AICP.
+    /// The agent will appear in the CLI picker (if it supports messaging)
+    /// and its tasks will show in the task list.
+    ///
+    /// - Parameters:
+    ///   - descriptor: Agent identity and capabilities.
+    ///   - transport: Communication channel (nil for monitor-only agents).
+    ///   - monitor: Custom TaskSource (nil to auto-generate from transport).
+    func registerAgent(
+        descriptor: AgentDescriptor,
+        transport: AgentTransport? = nil,
+        monitor: TaskSource? = nil
+    ) async {
+        await agentRegistry.register(
+            descriptor: descriptor,
+            transport: transport,
+            monitor: monitor
+        )
+    }
+
+    /// Register a remote agent by URL with standard HTTP transport.
+    func registerRemoteAgent(
+        id: String,
+        displayName: String,
+        endpointURL: URL,
+        iconSystemName: String = "puzzlepiece.extension",
+        iconColorHex: String = "#888888"
+    ) async {
+        let descriptor = AgentDescriptor(
+            id: id,
+            displayName: displayName,
+            iconSystemName: iconSystemName,
+            iconColorHex: iconColorHex,
+            supportsMessaging: true,
+            supportsFollowUp: true,
+            endpointURL: endpointURL
+        )
+        let transport = HTTPAgentTransport(
+            agentId: id,
+            baseURL: endpointURL
+        )
+        await agentRegistry.register(descriptor: descriptor, transport: transport)
+    }
+
+    /// Unregister a previously registered agent.
+    func unregisterAgent(id: String) async {
+        await agentRegistry.unregister(agentId: id)
     }
 
     var allDisplayTasks: [DisplayTask] {
@@ -273,12 +386,18 @@ final class ControlPlaneCore: ObservableObject {
             .sorted(by: Self.displayTaskOrdering)
     }
 
-    /// Sort by most recently updated first.
-    private nonisolated static func displayTaskOrdering(_ a: DisplayTask, _ b: DisplayTask) -> Bool {
+    /// Keep active work pinned above inactive history, then sort by recency within each bucket.
+    nonisolated static func displayTaskOrdering(_ a: DisplayTask, _ b: DisplayTask) -> Bool {
         if a.sortPriority != b.sortPriority {
             return a.sortPriority < b.sortPriority
         }
-        return a.updatedAt > b.updatedAt
+        if a.updatedAt != b.updatedAt {
+            return a.updatedAt > b.updatedAt
+        }
+        if a.title != b.title {
+            return a.title.localizedCaseInsensitiveCompare(b.title) == .orderedAscending
+        }
+        return a.id < b.id
     }
 
     var allRunningCount: Int {
@@ -491,6 +610,8 @@ final class ControlPlaneCore: ObservableObject {
             await submitCLISession(prompt: prompt, cli: selectedCLI)
         case .openClaw:
             await submitOpenClawTask(prompt: prompt)
+        case .custom(let agentId):
+            await submitToRegisteredAgent(agentId: agentId, prompt: prompt)
         default:
             lastErrorBanner = "\(selectedCLI.displayName) is not supported for new sessions."
         }
@@ -535,6 +656,27 @@ final class ControlPlaneCore: ObservableObject {
             telemetryManager.record(.taskSubmitted(taskId: task.taskId, profileId: profile.id, routeId: routeId))
         } catch {
             await handleTaskFailure(taskId: task.taskId, reason: error.localizedDescription)
+        }
+    }
+
+    private func submitToRegisteredAgent(agentId: String, prompt: String) async {
+        isSubmitting = true
+        defer { isSubmitting = false }
+
+        let message = AgentMessage(
+            routeId: "default",
+            prompt: prompt
+        )
+
+        do {
+            let response = try await agentRegistry.sendMessage(to: agentId, message: message)
+            composePrompt = ""
+            selectedTab = .running
+            setExpanded(false)
+
+            Self.log.info("Submitted to agent=\(agentId, privacy: .public) taskId=\(response.taskId, privacy: .public) status=\(response.status.rawValue, privacy: .public)")
+        } catch {
+            lastErrorBanner = "Failed to send to \(selectedCLI.displayName): \(error.localizedDescription)"
         }
     }
 
@@ -586,12 +728,20 @@ final class ControlPlaneCore: ObservableObject {
             available.append(.codex)
         }
 
+        // Include registered custom agents that support messaging
+        let customDescriptors = await agentRegistry.messageableDescriptors
+        for descriptor in customDescriptors {
+            let kind = TaskSourceKind.custom(descriptor.id)
+            if !available.contains(kind) {
+                available.append(kind)
+            }
+        }
+
         availableCLIs = available
 
         // Restore persisted selection or default to first available
-        if let savedCLI = settings.selectedCLI,
-           let kind = TaskSourceKind(rawValue: savedCLI),
-           available.contains(kind) {
+        let restoredKind = settings.selectedCLI.map(TaskSourceKind.from(rawValue:))
+        if let kind = restoredKind, available.contains(kind) {
             selectedCLI = kind
         } else if let first = available.first {
             selectedCLI = first
@@ -672,21 +822,6 @@ final class ControlPlaneCore: ObservableObject {
         }
     }
 
-    func requestSecureStorageAccess() async -> Bool {
-        guard let controllableStore = secretStore as? InteractiveSecureStorageControlling else {
-            return false
-        }
-
-        do {
-            lastErrorBanner = nil
-            return try controllableStore.requestInteractivePrimaryAccess()
-        } catch {
-            telemetryManager.record(.error("Keychain access failed: \(error.localizedDescription)"))
-            lastErrorBanner = "Keychain access failed: \(error.localizedDescription)"
-            return false
-        }
-    }
-
     func updateSetting(_ mutate: (inout AppSettings) -> Void) {
         mutate(&settings)
         telemetryManager.setOptIn(settings.telemetryOptIn)
@@ -707,10 +842,6 @@ final class ControlPlaneCore: ObservableObject {
 
         syncRuntimeConfigurationAsync()
         persistAsync()
-    }
-
-    func saveCredential(_ value: String, forRef ref: String) {
-        try? secretStore?.setSecret(value, for: ref)
     }
 
     func upsertCommandTemplateSet(_ templateSet: CommandTemplateSet) {
@@ -760,18 +891,6 @@ final class ControlPlaneCore: ObservableObject {
     }
 
     private func ensureRuntimeHealthy(for profile: ProfileConfig) async throws {
-        // Remote gateways can be managed externally; don't block task submission
-        // on runtime SSH controls when no SSH target is configured.
-        if profile.kind == .remote,
-           profile.sshRef?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true {
-            runtimeStatusByProfile[profile.id] = RuntimeStatus(
-                isHealthy: true,
-                detail: "Runtime managed externally",
-                checkedAt: Date()
-            )
-            return
-        }
-
         let status = try await runtimeManager.status(profileId: profile.id)
         runtimeStatusByProfile[profile.id] = status
         if status.isHealthy {
@@ -1128,12 +1247,26 @@ final class ControlPlaneCore: ObservableObject {
         routesByProfile = state.routeAliasesByProfile
         settings = state.settings
         archivedTaskIds = state.archivedTaskIds
+        registeredAgentDescriptors = state.registeredAgents
 
         if settings.selectedProfileId == nil {
             settings.selectedProfileId = profiles.first?.id
         }
 
         telemetryManager.setOptIn(settings.telemetryOptIn)
+
+        // Re-register persisted custom agents with HTTP transport
+        let descriptors = state.registeredAgents
+        Task {
+            for descriptor in descriptors {
+                guard descriptor.supportsMessaging, let url = descriptor.endpointURL else { continue }
+                let transport = HTTPAgentTransport(
+                    agentId: descriptor.id,
+                    baseURL: url
+                )
+                await self.agentRegistry.register(descriptor: descriptor, transport: transport)
+            }
+        }
     }
 
     private func persistAsync() {
@@ -1144,7 +1277,8 @@ final class ControlPlaneCore: ObservableObject {
             routeAliasesByProfile: routesByProfile,
             settings: settings,
             updatedAt: Date(),
-            archivedTaskIds: archivedTaskIds
+            archivedTaskIds: archivedTaskIds,
+            registeredAgents: registeredAgentDescriptors
         )
 
         Task {

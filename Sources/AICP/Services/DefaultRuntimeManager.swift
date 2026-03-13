@@ -49,22 +49,12 @@ actor DefaultRuntimeManager: RuntimeManager {
         }
 
         let context = LocalCommandContext.from(profile: profile)
-        var command = try templateEngine.render(
+        let command = try templateEngine.render(
             template: templateSet.command(for: action),
             values: context.values,
             allowedPlaceholders: templateSet.allowedPlaceholders
         )
         try whitelistValidator.validate(action: action, generatedCommand: command, templateSet: templateSet)
-
-        if profile.kind == .remote {
-            guard let sshRef = profile.sshRef, !sshRef.isEmpty else {
-                throw RuntimeManagerError.missingSSHReference
-            }
-            guard Self.isValidSSHReference(sshRef) else {
-                throw RuntimeManagerError.commandRejected("SSH reference contains invalid characters. Expected format: user@host or host.")
-            }
-            command = "ssh \(sshRef) '\(escapeForSingleQuotes(command))'"
-        }
 
         Self.log.debug("Executing command for action=\(String(describing: action), privacy: .public) profile=\(profile.name, privacy: .public)")
 
@@ -93,16 +83,5 @@ actor DefaultRuntimeManager: RuntimeManager {
 
         Self.log.info("Runtime action=\(String(describing: action), privacy: .public) completed healthy=\(healthy) profile=\(profile.name, privacy: .public)")
         return RuntimeStatus(isHealthy: healthy, detail: detail, checkedAt: Date())
-    }
-
-    private func escapeForSingleQuotes(_ raw: String) -> String {
-        raw.replacingOccurrences(of: "'", with: "'\\''")
-    }
-
-    /// Validates that an SSH reference matches a safe pattern (e.g. user@host, host, user@host:port).
-    private static let sshRefPattern = #"^[a-zA-Z0-9._\-]+(@[a-zA-Z0-9._\-]+(:[0-9]{1,5})?)?$"#
-
-    private static func isValidSSHReference(_ ref: String) -> Bool {
-        ref.range(of: sshRefPattern, options: .regularExpression) != nil
     }
 }

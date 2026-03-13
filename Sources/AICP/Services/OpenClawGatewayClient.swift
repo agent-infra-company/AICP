@@ -168,8 +168,13 @@ private struct ConnectAuthContext {
     let deviceTokenRef: String
 }
 
+private enum GatewayCredentialMode {
+    case token
+    case password
+}
+
 private struct GatewayCredential {
-    let mode: ProfileAuthMode
+    let mode: GatewayCredentialMode
     let value: String
 }
 
@@ -739,14 +744,7 @@ actor OpenClawGatewayClient: GatewayClient {
             return
         }
 
-        switch credential.mode {
-        case .token:
-            request.setValue("Bearer \(credential.value)", forHTTPHeaderField: "Authorization")
-        case .password:
-            request.setValue("Bearer \(credential.value)", forHTTPHeaderField: "Authorization")
-        case .none, .bearerToken:
-            break
-        }
+        request.setValue("Bearer \(credential.value)", forHTTPHeaderField: "Authorization")
     }
 
     private func authContext(for profile: ProfileConfig) -> ConnectAuthContext {
@@ -779,8 +777,6 @@ actor OpenClawGatewayClient: GatewayClient {
                     tokenForSignature: "",
                     deviceTokenRef: deviceTokenRef
                 )
-            case .none, .bearerToken:
-                break
             }
         }
 
@@ -788,17 +784,6 @@ actor OpenClawGatewayClient: GatewayClient {
     }
 
     private func resolvedSharedCredential(for profile: ProfileConfig) -> GatewayCredential? {
-        let authMode = profile.authMode.normalized
-        if let explicitCredential = profile.tokenRef
-            .flatMap({ try? secretStore.secret(for: $0) })?
-            .trimmingCharacters(in: .whitespacesAndNewlines),
-           !explicitCredential.isEmpty,
-           authMode == .token || authMode == .password {
-            return GatewayCredential(mode: authMode, value: explicitCredential)
-        }
-
-        guard profile.kind == .local else { return nil }
-
         let environment = ProcessInfo.processInfo.environment
         if let envToken = environment["OPENCLAW_GATEWAY_TOKEN"]?.trimmingCharacters(in: .whitespacesAndNewlines),
            !envToken.isEmpty {
@@ -905,9 +890,7 @@ actor OpenClawGatewayClient: GatewayClient {
             params["auth"] = AnyCodable(auth)
         }
 
-        if profile.kind == .local {
-            params["local"] = AnyCodable(true)
-        }
+        params["local"] = AnyCodable(true)
 
         return params
     }
@@ -1172,9 +1155,6 @@ actor OpenClawGatewayClient: GatewayClient {
     }
 
     private func deviceTokenRef(for profile: ProfileConfig) -> String {
-        if let tokenRef = profile.tokenRef, !tokenRef.isEmpty {
-            return "\(tokenRef).device"
-        }
         return "gateway.device.\(profile.id.uuidString)"
     }
 
@@ -1272,13 +1252,7 @@ actor OpenClawGatewayClient: GatewayClient {
         for path in localGatewayConfigPaths() {
             guard let data = try? Data(contentsOf: path) else { continue }
             guard let parsed = parseLocalGatewayCredential(fromConfigData: data, environment: environment) else { continue }
-            let mode: ProfileAuthMode
-            switch parsed.mode {
-            case "password":
-                mode = .password
-            default:
-                mode = .token
-            }
+            let mode: GatewayCredentialMode = parsed.mode == "password" ? .password : .token
             return GatewayCredential(mode: mode, value: parsed.credential)
         }
         return nil
@@ -1487,7 +1461,7 @@ actor OpenClawGatewayClient: GatewayClient {
         for path in localGatewayLaunchAgentPaths() {
             guard let data = try? Data(contentsOf: path) else { continue }
             guard let parsed = parseLaunchAgentCredential(fromPlistData: data) else { continue }
-            let mode: ProfileAuthMode = parsed.mode == "password" ? .password : .token
+            let mode: GatewayCredentialMode = parsed.mode == "password" ? .password : .token
             return GatewayCredential(mode: mode, value: parsed.credential)
         }
         return nil

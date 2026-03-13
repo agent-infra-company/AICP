@@ -6,7 +6,7 @@ struct OnboardingFlowView: View {
 
     @State private var currentStep = 0
 
-    private let totalSteps = 5
+    private let totalSteps = 4
 
     var body: some View {
         ZStack {
@@ -35,19 +35,6 @@ struct OnboardingFlowView: View {
                         )
                     case 2:
                         OnboardingPermissionStep(
-                            icon: "key.fill",
-                            title: "Secure Storage",
-                            description: "Use your Mac keychain for saved credentials and encrypted state after the local setup is explained.",
-                            privacyNote: "If you skip this, AICP keeps using local file storage for this install.",
-                            allowLabel: "Use Keychain",
-                            onAllow: {
-                                _ = await core.requestSecureStorageAccess()
-                                withAnimation { currentStep += 1 }
-                            },
-                            onSkip: { withAnimation { currentStep += 1 } }
-                        )
-                    case 3:
-                        OnboardingPermissionStep(
                             icon: "bell.badge.fill",
                             title: "Notifications",
                             description: "Get notified when tasks complete, fail, or need your input.",
@@ -67,7 +54,7 @@ struct OnboardingFlowView: View {
                             },
                             onSkip: { withAnimation { currentStep += 1 } }
                         )
-                    case 4: OnboardingCompletionStep()
+                    case 3: OnboardingCompletionStep()
                     default: EmptyView()
                     }
                 }
@@ -84,7 +71,7 @@ struct OnboardingFlowView: View {
                     currentStep: currentStep,
                     totalSteps: totalSteps,
                     // Hide nav buttons on permission steps (they have their own Allow/Skip)
-                    hideNextButton: currentStep == 1 || currentStep == 2 || currentStep == 3,
+                    hideNextButton: currentStep == 1 || currentStep == 2,
                     onBack: { withAnimation { currentStep -= 1 } },
                     onNext: { withAnimation { currentStep += 1 } },
                     onFinish: onFinish

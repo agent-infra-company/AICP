@@ -21,6 +21,7 @@ struct AppSettings: Codable, Hashable {
     var notchStyle: NotchStyle
     var selectedCLI: String?
     var openClawEnabled: Bool
+    var virtualNotchEnabled: Bool
 
     static var `default`: AppSettings {
         AppSettings(
@@ -29,14 +30,15 @@ struct AppSettings: Codable, Hashable {
             hideInScreenRecording: true,
             telemetryOptIn: false,
             retentionDays: 90,
-            primaryDisplayOnly: true,
+            primaryDisplayOnly: false,
             selectedProfileId: nil,
             selectedRouteByProfile: [:],
             hasCompletedOnboarding: false,
             glowColorHex: "#FF0000",
             notchStyle: .glow,
             selectedCLI: nil,
-            openClawEnabled: false
+            openClawEnabled: false,
+            virtualNotchEnabled: true
         )
     }
 
@@ -53,7 +55,8 @@ struct AppSettings: Codable, Hashable {
         glowColorHex: String = "#FF0000",
         notchStyle: NotchStyle = .glow,
         selectedCLI: String? = nil,
-        openClawEnabled: Bool = false
+        openClawEnabled: Bool = false,
+        virtualNotchEnabled: Bool = true
     ) {
         self.launchAtLogin = launchAtLogin
         self.showInFullscreen = showInFullscreen
@@ -68,6 +71,7 @@ struct AppSettings: Codable, Hashable {
         self.notchStyle = notchStyle
         self.selectedCLI = selectedCLI
         self.openClawEnabled = openClawEnabled
+        self.virtualNotchEnabled = virtualNotchEnabled
     }
 
     init(from decoder: Decoder) throws {
@@ -85,6 +89,7 @@ struct AppSettings: Codable, Hashable {
         notchStyle = try container.decodeIfPresent(NotchStyle.self, forKey: .notchStyle) ?? .glow
         selectedCLI = try container.decodeIfPresent(String.self, forKey: .selectedCLI)
         openClawEnabled = try container.decodeIfPresent(Bool.self, forKey: .openClawEnabled) ?? false
+        virtualNotchEnabled = try container.decodeIfPresent(Bool.self, forKey: .virtualNotchEnabled) ?? true
     }
 }
 
@@ -96,6 +101,7 @@ struct PersistedState: Codable {
     var settings: AppSettings
     var updatedAt: Date
     var archivedTaskIds: Set<String>
+    var registeredAgents: [AgentDescriptor]
 
     static func bootstrap() -> PersistedState {
         let localTemplates = CommandTemplateSet.localDefault
@@ -108,7 +114,8 @@ struct PersistedState: Codable {
             routeAliasesByProfile: [:],
             settings: settings,
             updatedAt: Date(),
-            archivedTaskIds: []
+            archivedTaskIds: [],
+            registeredAgents: []
         )
     }
 
@@ -131,7 +138,8 @@ struct PersistedState: Codable {
             ],
             settings: settings,
             updatedAt: Date(),
-            archivedTaskIds: []
+            archivedTaskIds: [],
+            registeredAgents: []
         )
     }
 
@@ -142,7 +150,8 @@ struct PersistedState: Codable {
         routeAliasesByProfile: [UUID: [RouteInfo]],
         settings: AppSettings,
         updatedAt: Date,
-        archivedTaskIds: Set<String> = []
+        archivedTaskIds: Set<String> = [],
+        registeredAgents: [AgentDescriptor] = []
     ) {
         self.profiles = profiles
         self.commandTemplateSets = commandTemplateSets
@@ -151,6 +160,7 @@ struct PersistedState: Codable {
         self.settings = settings
         self.updatedAt = updatedAt
         self.archivedTaskIds = archivedTaskIds
+        self.registeredAgents = registeredAgents
     }
 
     init(from decoder: Decoder) throws {
@@ -162,5 +172,6 @@ struct PersistedState: Codable {
         settings = try container.decode(AppSettings.self, forKey: .settings)
         updatedAt = try container.decode(Date.self, forKey: .updatedAt)
         archivedTaskIds = try container.decodeIfPresent(Set<String>.self, forKey: .archivedTaskIds) ?? []
+        registeredAgents = try container.decodeIfPresent([AgentDescriptor].self, forKey: .registeredAgents) ?? []
     }
 }

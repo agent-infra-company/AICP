@@ -201,48 +201,6 @@ final class ControlPlaneCoreSubmissionTests: XCTestCase {
         XCTAssertFalse(core.isExpanded)
     }
 
-    func testSubmitPromptSkipsRuntimeSSHCheckForRemoteWithoutSSHReference() async throws {
-        let persistenceStore = StubPersistenceStore(state: PersistedState.bootstrapWithOpenClaw())
-        let gatewayClient = StubGatewayClient(
-            sendTaskResponses: [
-                .success(
-                    SentTaskInfo(
-                        taskId: "remote-task-1",
-                        sessionId: "agent:main:main",
-                        runId: "remote-task-1",
-                        status: .running
-                    )
-                )
-            ]
-        )
-        let runtimeManager = MissingSSHRuntimeManager()
-        let core = makeCore(
-            gatewayClient: gatewayClient,
-            persistenceStore: persistenceStore,
-            runtimeManager: runtimeManager
-        )
-
-        await core.bootstrap()
-        guard var profile = core.profiles.first else {
-            XCTFail("Expected bootstrap profile")
-            return
-        }
-        profile.kind = .remote
-        profile.gatewayURL = URL(string: "https://example-gateway.local")!
-        profile.sshRef = nil
-        core.upsertProfile(profile)
-        core.selectProfile(profile.id)
-        core.selectCLI(.openClaw)
-        core.composePrompt = "Send to remote gateway"
-
-        await core.submitPrompt()
-
-        let statusCalls = await runtimeManager.statusCallCount()
-        XCTAssertEqual(statusCalls, 0)
-        XCTAssertEqual(core.tasks.first?.taskId, "remote-task-1")
-        XCTAssertEqual(core.tasks.first?.status, .running)
-    }
-
     private func makeCore(
         gatewayClient: GatewayClient,
         persistenceStore: PersistenceStore,
@@ -324,33 +282,6 @@ private actor StubRuntimeManager: RuntimeManager {
 
     private func healthyStatus() -> RuntimeStatus {
         RuntimeStatus(isHealthy: true, detail: "Healthy", checkedAt: Date())
-    }
-}
-
-private actor MissingSSHRuntimeManager: RuntimeManager {
-    private var statusCalls = 0
-
-    func updateConfiguration(profiles: [ProfileConfig], templateSets: [CommandTemplateSet]) async {}
-
-    func start(profileId: UUID) async throws -> RuntimeStatus {
-        throw RuntimeManagerError.missingSSHReference
-    }
-
-    func stop(profileId: UUID) async throws -> RuntimeStatus {
-        throw RuntimeManagerError.missingSSHReference
-    }
-
-    func restart(profileId: UUID) async throws -> RuntimeStatus {
-        throw RuntimeManagerError.missingSSHReference
-    }
-
-    func status(profileId: UUID) async throws -> RuntimeStatus {
-        statusCalls += 1
-        throw RuntimeManagerError.missingSSHReference
-    }
-
-    func statusCallCount() -> Int {
-        statusCalls
     }
 }
 

@@ -35,11 +35,12 @@ private let sampleRolodexTasks: [SampleRolodexTask] = [
 
 struct ControlPlaneRootView: View {
     @ObservedObject var core: ControlPlaneCore
+    @ObservedObject var panelState: NotchPanelState
 
     var body: some View {
         ZStack(alignment: .top) {
-            if core.isExpanded {
-                ExpandedControlPlaneView(core: core)
+            if core.isExpanded && panelState.isActiveDisplay {
+                ExpandedControlPlaneView(core: core, info: panelState.displayInfo)
                     .transition(
                         .asymmetric(
                             insertion: .scale(scale: 0.92, anchor: .top)
@@ -50,7 +51,7 @@ struct ControlPlaneRootView: View {
                         )
                     )
             } else {
-                CollapsedControlPlaneView(core: core)
+                CollapsedControlPlaneView(core: core, info: panelState.displayInfo)
                     .transition(.opacity)
             }
         }
@@ -65,13 +66,45 @@ struct ControlPlaneRootView: View {
 
 private struct CollapsedControlPlaneView: View {
     @ObservedObject var core: ControlPlaneCore
+    let info: NotchDisplayInfo
 
     var body: some View {
-        if core.notchDisplayInfo.hasNotch {
-            NotchGradientCollapsedView(core: core)
-        } else {
-            PillCollapsedView(core: core)
-        }
+        NotchGradientCollapsedView(core: core, info: info)
+    }
+}
+
+/// Filled notch shape for virtual notch on external monitors.
+/// Draws a black region that mimics the hardware notch cutout, anchored to the top
+/// edge with rounded bottom corners — like the real Dynamic Island silhouette.
+private struct VirtualNotchFillShape: Shape {
+    var notchWidth: CGFloat
+    var cornerRadius: CGFloat = 14
+
+    var animatableData: CGFloat {
+        get { notchWidth }
+        set { notchWidth = newValue }
+    }
+
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        let midX = rect.midX
+        let halfW = notchWidth / 2
+
+        // Start at top-left, go across top, down the right side with rounded bottom corners
+        path.move(to: CGPoint(x: midX - halfW, y: 0))
+        path.addLine(to: CGPoint(x: midX + halfW, y: 0))
+        path.addLine(to: CGPoint(x: midX + halfW, y: rect.height - cornerRadius))
+        path.addQuadCurve(
+            to: CGPoint(x: midX + halfW - cornerRadius, y: rect.height),
+            control: CGPoint(x: midX + halfW, y: rect.height)
+        )
+        path.addLine(to: CGPoint(x: midX - halfW + cornerRadius, y: rect.height))
+        path.addQuadCurve(
+            to: CGPoint(x: midX - halfW, y: rect.height - cornerRadius),
+            control: CGPoint(x: midX - halfW, y: rect.height)
+        )
+        path.closeSubpath()
+        return path
     }
 }
 
@@ -114,10 +147,9 @@ private struct NotchOutlineShape: Shape {
 
 private struct NotchGradientCollapsedView: View {
     @ObservedObject var core: ControlPlaneCore
+    let info: NotchDisplayInfo
     @State private var toastExpanded = false
     @State private var toastHoverTimer: DispatchWorkItem?
-
-    private var info: NotchDisplayInfo { core.notchDisplayInfo }
     private var glowColor: Color { Color(hex: core.settings.glowColorHex) }
     private var intensityMultiplier: Double {
         switch core.settings.notchStyle {
@@ -141,6 +173,13 @@ private struct NotchGradientCollapsedView: View {
 
     var body: some View {
         ZStack(alignment: .top) {
+            // Virtual notch: draw a solid black fill to simulate the hardware notch cutout
+            if info.isVirtualNotch {
+                VirtualNotchFillShape(notchWidth: effectiveNotchWidth)
+                    .fill(Color.black)
+                    .frame(width: effectiveTotalWidth, height: info.notchHeight)
+            }
+
             TimelineView(.animation(minimumInterval: 1.0 / 30)) { context in
                 let t = context.date.timeIntervalSinceReferenceDate
                 let slowAngle = t.remainder(dividingBy: 8) / 8 * 360
@@ -316,124 +355,14 @@ private func toastStatusLabel(_ status: TaskStatus) -> String {
     }
 }
 
-private struct PillCollapsedView: View {
-    @ObservedObject var core: ControlPlaneCore
-    @State private var toastExpanded = false
-    @State private var toastHoverTimer: DispatchWorkItem?
-
-    private var currentWidth: CGFloat {
-        toastExpanded ? toastExpandedWidth : 340
-    }
-
-    var body: some View {
-        ZStack {
-            if core.activeToast == nil {
-                HStack(spacing: 10) {
-                    Circle()
-                        .fill(core.allNeedsInputCount == 0 ? Color.green : Color.orange)
-                        .frame(width: 8, height: 8)
-
-                    Text("AICP")
-                        .font(.system(size: 12, weight: .semibold, design: .rounded))
-
-                    Spacer(minLength: 8)
-
-                    Text("\(core.allRunningCount) running")
-                        .font(.system(size: 11, weight: .medium, design: .rounded))
-                        .foregroundStyle(.secondary)
-
-                    if core.allNeedsInputCount > 0 {
-                        Text("\(core.allNeedsInputCount) input")
-                            .font(.system(size: 11, weight: .medium, design: .rounded))
-                            .foregroundStyle(Color.orange)
-                    }
-                }
-                .padding(.horizontal, 14)
-                .transition(.opacity)
-            }
-
-            if let toast = core.activeToast {
-                HStack(spacing: 8) {
-                    RiveAvatarView()
-                        .frame(width: 24, height: 24)
-                        .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
-
-                    MarqueeText(
-                        text: toast.title,
-                        font: .system(size: 13, weight: .medium),
-                        color: .white.opacity(0.9),
-                        speed: 30,
-                        minimumCharacterCount: toastMarqueeCharacterThreshold
-                    )
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .layoutPriority(1)
-
-                    Text(toastStatusLabel(toast.status))
-                        .font(.system(size: 13, weight: .regular))
-                        .foregroundStyle(.white.opacity(0.5))
-                        .fixedSize()
-                }
-                .padding(.horizontal, 14)
-                .opacity(toastExpanded ? 1 : 0)
-                .transition(.opacity)
-            }
-        }
-        .frame(width: currentWidth, height: 38)
-        .background(.ultraThinMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(Color.white.opacity(0.22), lineWidth: 1)
-        )
-        .contentShape(Rectangle())
-        .onTapGesture {
-            if core.activeToast != nil {
-                core.handleToastTap()
-            } else {
-                core.setExpanded(true)
-            }
-        }
-        .onHover { hovering in
-            if hovering && core.activeToast != nil {
-                startToastHoverTimer()
-            } else {
-                cancelToastHoverTimer()
-            }
-        }
-        .animation(.spring(response: 0.45, dampingFraction: 0.75), value: toastExpanded)
-        .onChange(of: core.activeToast) { _, newToast in
-            if newToast != nil {
-                toastExpanded = true
-            } else {
-                toastExpanded = false
-            }
-        }
-    }
-
-    private func startToastHoverTimer() {
-        guard toastHoverTimer == nil else { return }
-        let item = DispatchWorkItem { [core] in
-            Task { @MainActor in
-                core.handleToastLongHover()
-            }
-        }
-        toastHoverTimer = item
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: item)
-    }
-
-    private func cancelToastHoverTimer() {
-        toastHoverTimer?.cancel()
-        toastHoverTimer = nil
-    }
-}
-
 // MARK: - Expanded View
 
 private struct ExpandedControlPlaneView: View {
     @ObservedObject var core: ControlPlaneCore
+    let info: NotchDisplayInfo
 
     private var notchTop: CGFloat {
-        core.notchDisplayInfo.hasNotch ? core.notchDisplayInfo.notchHeight : 0
+        info.hasNotch ? info.notchHeight : 0
     }
 
     private var displayTasks: [DisplayTask] {
@@ -1044,6 +973,7 @@ private struct UnifiedTaskRow: View {
         case .claudeDesktop: return .orange
         case .cursor: return .indigo
         case .webAIChat: return .cyan
+        case .custom: return .gray
         }
     }
 
@@ -1052,8 +982,8 @@ private struct UnifiedTaskRow: View {
             SnakeGrid(mode: gridMode)
 
             Group {
-                if let imageName = task.sourceKind.iconImageName,
-                   let nsImage = NSImage(named: imageName) ?? Bundle.module.image(forResource: imageName) {
+                if let imageName = task.resolvedIconImageName,
+                   let nsImage = NSImage(named: imageName) ?? Bundle.appModule.image(forResource: imageName) {
                     Image(nsImage: nsImage)
                         .resizable()
                         .aspectRatio(contentMode: .fit)
@@ -1066,8 +996,19 @@ private struct UnifiedTaskRow: View {
             }
             .frame(width: 14, height: 14)
 
-            if let workspace = task.workspace {
-                Text(workspace)
+            if let agentLabel = task.agentLabel {
+                Text(agentLabel)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(sourceColor.opacity(0.8))
+                    .lineLimit(1)
+
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.3))
+            }
+
+            if let locationLabel = task.locationLabel {
+                Text(locationLabel)
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(.white.opacity(0.9))
                     .lineLimit(1)

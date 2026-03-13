@@ -11,7 +11,6 @@ protocol RuntimeManager: AnyObject, Sendable {
 enum RuntimeManagerError: Error, LocalizedError {
     case profileMissing
     case templateSetMissing
-    case missingSSHReference
     case commandRejected(String)
     case unhealthy(String)
 
@@ -21,8 +20,6 @@ enum RuntimeManagerError: Error, LocalizedError {
             "Profile not found."
         case .templateSetMissing:
             "Command template set not found for profile."
-        case .missingSSHReference:
-            "Remote profile is missing an SSH reference."
         case let .commandRejected(message):
             "Runtime command rejected: \(message)"
         case let .unhealthy(message):
